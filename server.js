@@ -27,6 +27,32 @@ if (process.env.TURN_URLS) {
   });
 }
 
+// TURN-посредник для зрителей за «строгими» сетями (мобильный интернет): видео идёт через него,
+// когда прямое подключение невозможно. Временные ключи берём у Cloudflare или Metered (что настроено).
+let turnCache = { at: 0, list: [] };
+async function turnServers() {
+  if (Date.now() - turnCache.at < 3600e3) return turnCache.list;
+  let list = [];
+  try {
+    if (process.env.CF_TURN_KEY_ID && process.env.CF_TURN_TOKEN) {
+      const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(process.env.CF_TURN_KEY_ID)}/credentials/generate-ice-servers`, {
+        method: 'POST', headers: { Authorization: 'Bearer ' + process.env.CF_TURN_TOKEN, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ttl: 86400 }), signal: AbortSignal.timeout(8000),
+      });
+      const j = await r.json();
+      list = Array.isArray(j.iceServers) ? j.iceServers : j.iceServers ? [j.iceServers] : [];
+    } else if (process.env.METERED_TURN_URL) {
+      const r = await fetch(process.env.METERED_TURN_URL, { signal: AbortSignal.timeout(8000) });
+      const j = await r.json();
+      list = Array.isArray(j) ? j : Array.isArray(j.iceServers) ? j.iceServers : [];
+    }
+  } catch (e) { console.warn('turn:', e.message); }
+  // оставляем только TURN (STUN у нас свой), и кэшируем на час
+  list = list.filter(x => x && x.urls && [].concat(x.urls).some(u => /^turns?:/.test(u)));
+  turnCache = { at: list.length ? Date.now() : Date.now() - 3300e3, list };
+  return list;
+}
+
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -44,7 +70,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/health') { res.writeHead(200); return res.end('ok'); }
   if (url.pathname === '/config') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify({ iceServers: ICE, accounts: accounts.enabled }));
+    return turnServers().then(t => res.end(JSON.stringify({ iceServers: ICE.concat(t), accounts: accounts.enabled })));
   }
   if (/^\/api\/(auth|me|friends|avatar)(\/|$)/.test(url.pathname)) { accounts.handle(req, res, url.pathname); return; }
   if (url.pathname === '/api/hit' || url.pathname === '/api/stats') {
