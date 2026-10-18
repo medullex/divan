@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Проверка сети — Общий диван</title>
+<style>
+:root{--bg:#141012;--seat:#1f191c;--line:#3a2f33;--fg:#f2e9e4;--muted:#a8999b;--lamp:#f5a742;--ok:#7cc59a;--bad:#d9707f;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:640px;margin:0 auto;padding:18px 16px 40px;display:flex;flex-direction:column;gap:14px}
+h1{font-size:20px;margin:0}
+p{margin:0;color:var(--muted)}
+button{font:600 15px system-ui,sans-serif;border:0;border-radius:999px;padding:12px 20px;background:var(--lamp);color:#2a1a06;cursor:pointer}
+ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+li{background:var(--seat);border:1px solid var(--line);border-radius:6px;padding:10px 12px;display:flex;justify-content:space-between;gap:10px}
+li b{font-weight:600}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.wait{color:var(--muted)}
+#sum{font-weight:600}
+code{font:12px ui-monospace,Menlo,Consolas,monospace;color:var(--muted);word-break:break-all}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Проверка сети</h1>
+  <p>Проверяет, может ли это устройство подключиться к посреднику (TURN), через который идёт видео-файл в «строгих» сетях. Занимает ~10 секунд.</p>
+  <button id="go" type="button">Проверить</button>
+  <ul id="list"></ul>
+  <p id="sum"></p>
+  <code id="raw"></code>
+</div>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+function label(u){
+  if (/^stun:/.test(u)) return 'Прямое (STUN)';
+  if (/^turns:/.test(u)) return 'Посредник, шифрованный TCP :443';
+  if (/transport=tcp/.test(u)) return 'Посредник, TCP :' + (u.match(/:(\d+)/) || [,'?'])[1];
+  return 'Посредник, UDP :' + (u.match(/:(\d+)/) || [,'?'])[1];
+}
+function test(server, url){
+  return new Promise(res => {
+    const relay = !/^stun:/.test(url);
+    let pc;
+    try { pc = new RTCPeerConnection({ iceServers: [{ ...server, urls: url }], iceTransportPolicy: relay ? 'relay' : 'all' }); }
+    catch { return res(false); }
+    let done = false;
+    const finish = ok => { if (done) return; done = true; try { pc.close(); } catch {} res(ok); };
+    pc.onicecandidate = e => {
+      if (!e.candidate) return;
+      const c = e.candidate.candidate || '';
+      if (relay ? / typ relay/.test(c) : / typ srflx/.test(c)) finish(true);
+    };
+    pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') finish(false); };
+    pc.createDataChannel('t');
+    pc.createOffer().then(o => pc.setLocalDescription(o)).catch(() => finish(false));
+    setTimeout(() => finish(false), 9000);
+  });
+}
+$('#go').addEventListener('click', async () => {
+  $('#go').disabled = true; $('#sum').textContent = ''; $('#list').replaceChildren();
+  let cfg;
+  try { cfg = await (await fetch('/config', { cache: 'no-store' })).json(); }
+  catch { $('#sum').textContent = 'Не удалось загрузить настройки сайта.'; $('#go').disabled = false; return; }
+  const jobs = [];
+  for (const s of cfg.iceServers || []) for (const u of [].concat(s.urls)) jobs.push([s, u]);
+  const results = [];
+  await Promise.all(jobs.map(async ([s, u]) => {
+    const li = document.createElement('li');
+    const name = document.createElement('b'); name.textContent = label(u);
+    const st = document.createElement('span'); st.className = 'wait'; st.textContent = 'проверяю…';
+    li.append(name, st); $('#list').append(li);
+    const ok = await test(s, u);
+    st.className = ok ? 'ok' : 'bad'; st.textContent = ok ? 'работает' : 'не проходит';
+    results.push((ok ? '+' : '-') + label(u));
+  }));
+  const turnOk = results.some(r => r[0] === '+' && r.includes('Посредник'));
+  const hasTurn = results.some(r => r.includes('Посредник'));
+  $('#sum').innerHTML = '';
+  $('#sum').className = turnOk ? 'ok' : 'bad';
+  $('#sum').textContent = !hasTurn ? 'Посредник на сайте не настроен.'
+    : turnOk ? 'Посредник доступен — видео-файл должен показываться и в этой сети.'
+    : 'Посредник из этой сети недоступен: оператор блокирует такие подключения.';
+  $('#raw').textContent = navigator.userAgent.replace(/\s+/g, ' ').slice(0, 140);
+  $('#go').disabled = false;
+});
+})();
+</script>
+</body>
+</html>
