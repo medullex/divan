@@ -8,6 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const miniws = require('./miniws');
+const accounts = require('./accounts');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -42,8 +43,9 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/health') { res.writeHead(200); return res.end('ok'); }
   if (url.pathname === '/config') {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    return res.end(JSON.stringify({ iceServers: ICE }));
+    return res.end(JSON.stringify({ iceServers: ICE, accounts: accounts.enabled }));
   }
+  if (/^\/api\/(auth|me|friends)(\/|$)/.test(url.pathname)) { accounts.handle(req, res, url.pathname); return; }
   if (url.pathname === '/api/search') return apiSearch(url.searchParams.get('q'), res);
   if (url.pathname === '/api/rutube') return apiRutubeInfo(url.searchParams.get('id'), res);
   const file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
@@ -133,7 +135,7 @@ function liveState(r) {
   const s = r.state;
   return { playing: s.playing, pos: s.playing ? s.pos + (Date.now() - s.at) / 1000 : s.pos };
 }
-const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji }));
+const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null }));
 const roomInfo = r => ({ t: 'room', hostId: r.hostId, live: r.live, media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
 
 // Видео с Rutube / VK Видео из сообщения клиента -> проверенный объект (или null)
@@ -169,15 +171,19 @@ function broadcast(r, msg, exceptId) {
 const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, n);
 const validCode = c => typeof c === 'string' && /^[a-z0-9-]{3,32}$/.test(c);
 
+accounts.setRoomLocked(code => !!(rooms.get(code) && rooms.get(code).pass));
+
 // ---------- websocket ----------
 const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => {
-  let room = null, id = null, passTries = 0;
+  let room = null, roomCode = null, id = null, passTries = 0;
   // антиспам: запас 80 сообщений, пополняется ~20 в секунду (WebRTC шлёт пачки служебных сообщений)
   let tokens = 80, last = Date.now();
 
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
 
+  // сообщения обрабатываем строго по очереди: вход в аккаунт (запрос к базе) должен закончиться раньше, чем вход в комнату
+  let chain = Promise.resolve();
   ws.on('message', raw => {
     const now = Date.now();
     tokens = Math.min(80, tokens + (now - last) / 50); last = now;
@@ -185,6 +191,28 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
 
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
+    chain = chain.then(() => onMessage(m, now)).catch(e => console.warn('ws:', e.message));
+  });
+
+  async function onMessage(m, now) {
+    if (m.t === 'auth') { // вход в аккаунт: для онлайн-статуса, друзей и приглашений
+      if (ws.user || !accounts.enabled) return;
+      const user = await accounts.attach(ws, String(m.token || '')).catch(() => null);
+      send(ws, user ? { t: 'authok', user } : { t: 'authfail' });
+      return;
+    }
+    if (m.t === 'invite') { // позвать друга в свою комнату
+      if (!ws.user || !room) return;
+      const to = String(m.to || '');
+      if (!accounts.isFriend(ws.user.login, to)) return send(ws, { t: 'error', text: 'Это не ваш друг' });
+      if (!accounts.presenceOf(to).online) return send(ws, { t: 'error', text: 'Друг сейчас не в сети' });
+      ws.invites = ws.invites || {};
+      if (now - (ws.invites[to] || 0) < 10000) return;
+      ws.invites[to] = now;
+      accounts.toUser(to, { t: 'invited', from: ws.user, room: roomCode, locked: !!room.pass });
+      send(ws, { t: 'invitesent', to });
+      return;
+    }
 
     if (m.t === 'hello') {
       if (room || !validCode(m.room)) return send(ws, { t: 'error', text: 'Неверный код комнаты' });
@@ -205,7 +233,10 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       const color = /^#[0-9a-f]{6}$/i.test(String(m.color || '')) ? String(m.color).toLowerCase()
         : (COLORS.find(c => !used.has(c)) || COLORS[r.people.size % COLORS.length]);
       const emoji = AVATARS.includes(m.emoji) ? m.emoji : null;
-      r.people.set(id, { ws, name: clean(m.name, 24) || 'Гость', color, emoji });
+      const u = ws.user; // вошёл в аккаунт — показываем имя и аватарку из профиля
+      r.people.set(id, { ws, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null });
+      roomCode = m.room; ws.roomCode = m.room;
+      if (u) accounts.notifyFriends(u.login);
       if (!r.hostId) r.hostId = id; // первый вошедший — ведущий
       send(ws, { ...roomInfo(r), t: 'welcome', id, chat: r.chat });
       broadcast(r, roomInfo(r), id);
@@ -276,6 +307,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
         if (pass) { const salt = crypto.randomBytes(8).toString('hex'); room.pass = { salt, hash: hashPass(salt, pass) }; }
         else room.pass = null;
         broadcast(room, roomInfo(room));
+        for (const p of room.people.values()) if (p.login) accounts.notifyFriends(p.login);
         break;
       }
       case 'sync': { // ведущий: состояние плеера Rutube/VK (пауза, время)
@@ -314,9 +346,11 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
         break;
       }
     }
-  });
+  }
 
   ws.on('close', () => {
+    ws.roomCode = null;
+    accounts.detach(ws);
     if (!room) return;
     room.people.delete(id);
     if (room.hostId === id) { // ведущий ушёл — управление переходит следующему
