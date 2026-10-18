@@ -256,15 +256,24 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
     if (m.t === 'hello') {
       if (room || !validCode(m.room)) return send(ws, { t: 'error', text: 'Неверный код комнаты' });
       const r = getRoom(m.room);
-      if (r.people.size >= MAX_PEOPLE) return send(ws, { t: 'error', text: 'Комната заполнена' });
+      const vid = /^[a-f0-9]{16}$/.test(String(m.vid || '')) ? String(m.vid) : null; // метка браузера
+      const isOwner = !!vid && vid === r.ownerVid; // создатель комнаты (или тот, кому он передал управление)
+      // тот же браузер уже числится в комнате (перезагрузил страницу или открыл вторую вкладку) — убираем старую копию
+      const old = vid ? [...r.people.entries()].filter(([, p]) => p.vid === vid) : [];
+      if (r.people.size - old.length >= MAX_PEOPLE) return send(ws, { t: 'error', text: 'Комната заполнена' });
       const pass = clean(m.pass, 64);
-      if (r.pass) { // комната с паролем
+      if (r.pass && !isOwner) { // комната с паролем (создателю пароль не нужен)
         if (++passTries > 10) return send(ws, { t: 'error', text: 'Слишком много попыток. Обновите страницу.' });
         const ok = pass && crypto.timingSafeEqual(hashPass(r.pass.salt, pass), r.pass.hash);
         if (!ok) return send(ws, { t: 'needpass', wrong: !!pass });
       } else if (r.people.size === 0 && !r.hostId && pass) { // создатель комнаты задал пароль
         const salt = crypto.randomBytes(8).toString('hex');
         r.pass = { salt, hash: hashPass(salt, pass) };
+      }
+      for (const [pid, p] of old) {
+        r.people.delete(pid);
+        if (r.hostId === pid) r.hostId = null;
+        p.ws.replaced = true; send(p.ws, { t: 'replaced' }); try { p.ws.close(); } catch {}
       }
       room = r; r.emptySince = null;
       id = crypto.randomBytes(6).toString('hex');
@@ -273,11 +282,17 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
         : (COLORS.find(c => !used.has(c)) || COLORS[r.people.size % COLORS.length]);
       const emoji = AVATARS.includes(m.emoji) ? m.emoji : null;
       const u = ws.user; // вошёл в аккаунт — показываем имя и аватарку из профиля
-      if (/^[a-f0-9]{16}$/.test(String(m.vid || ''))) { ws.vid = String(m.vid); stats.touch(ws.vid); }
+      if (vid) { ws.vid = vid; stats.touch(vid); }
       r.people.set(id, { ws, vid: ws.vid || null, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null, ava: u ? u.ava : null });
       roomCode = m.room; ws.roomCode = m.room;
       if (u) accounts.notifyFriends(u.login);
-      if (!r.hostId) r.hostId = id; // первый вошедший — ведущий
+      if (!r.ownerVid && vid && !r.hostId) r.ownerVid = vid; // первый вошедший — создатель комнаты
+      // ведущим становится: первый вошедший; создатель, вернувшийся в комнату; ведущий, который перезагрузил страницу
+      if (!r.hostId || isOwner || (vid && vid === r.graceVid)) {
+        if (r.hostId && r.hostId !== id) r.live = null; // у прежнего ведущего прекращается показ его файла
+        r.hostId = id;
+        clearTimeout(r.graceTimer); r.graceVid = null;
+      }
       send(ws, { ...roomInfo(r), t: 'welcome', id, chat: r.chat });
       broadcast(r, roomInfo(r), id);
       return;
@@ -367,6 +382,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       case 'givehost': { // ведущий передаёт управление
         if (!isHost || !room.people.has(String(m.to))) return;
         room.hostId = String(m.to); room.live = null; // видео с Rutube/VK остаётся, его просто ведёт новый ведущий
+        room.ownerVid = room.people.get(room.hostId).vid || room.ownerVid; // передал управление — передал и комнату
         broadcast(room, roomInfo(room));
         break;
       }
@@ -391,12 +407,17 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
   ws.on('close', () => {
     ws.roomCode = null;
     accounts.detach(ws);
-    if (!room) return;
+    if (!room || ws.replaced || room.people.get(id)?.ws !== ws) return; // эту копию уже заменила новая вкладка
     room.people.delete(id);
-    if (room.hostId === id) { // ведущий ушёл — управление переходит следующему
-      room.hostId = room.people.keys().next().value || null;
+    if (room.hostId === id) { // ведущий ушёл
+      room.hostId = null;
       room.live = null;
       if (room.state.playing) room.state = { ...liveState(room), playing: false, at: Date.now() }; // ставим на паузу
+      const r = room;
+      const pass = () => { r.graceVid = null; if (!r.hostId && r.people.size) { r.hostId = r.people.keys().next().value; broadcast(r, roomInfo(r)); } };
+      if (ws.vid && r.people.size) { // ждём 20 секунд — вдруг он просто перезагрузил страницу
+        r.graceVid = ws.vid; clearTimeout(r.graceTimer); r.graceTimer = setTimeout(pass, 20000);
+      } else pass();
     }
     if (room.people.size === 0) room.emptySince = Date.now();
     else broadcast(room, roomInfo(room));
