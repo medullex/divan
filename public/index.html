@@ -229,13 +229,6 @@ $('#joinCodeBtn').addEventListener('click', () => {
 });
 $('#codeIn').addEventListener('keydown', e => { if (e.key==='Enter') $('#joinCodeBtn').click(); });
 nameIn.addEventListener('keydown', e => { if (e.key==='Enter') $('#createBtn').click(); });
-const preset = roomFromUrl();
-if (preset){
-  $('#codeIn').value = preset;
-  $('#createBtn').textContent = 'Войти в комнату';
-  if (nameIn.value) enter(preset);
-}
-
 /* ---------- состояние ---------- */
 let ws = null, myId = null, roomCode = null, myName = '', retry = 0;
 let hostId = null, live = null, peers = [], chat = [];
@@ -346,7 +339,12 @@ async function onSignal(from, d){
     if (from !== hostId) return;
     closePc(from);
     const pc = makePc(from, d.gen);
-    pc.ontrack = e => attachRemote(e.streams[0] || new MediaStream([e.track]));
+    pc.ontrack = e => {
+      // просим браузер не копить запас: меньше задержка относительно ведущего
+      try { e.receiver.jitterBufferTarget = 0; } catch {}
+      try { e.receiver.playoutDelayHint = 0; } catch {}
+      attachRemote(e.streams[0] || new MediaStream([e.track]));
+    };
     try {
       await pc.setRemoteDescription(d.sdp); await flush(pc);
       const ans = await pc.createAnswer(); await pc.setLocalDescription(ans);
@@ -522,6 +520,14 @@ $('#chatform').addEventListener('submit', e => {
   const inp = $('#chatin'); const text = inp.value.trim(); if (!text) return;
   out({ t:'chat', text }); inp.value = '';
 });
+
+/* ---------- вход по ссылке на комнату (в самом конце, когда всё объявлено) ---------- */
+const preset = roomFromUrl();
+if (preset){
+  $('#codeIn').value = preset;
+  $('#createBtn').textContent = 'Войти в комнату';
+  if (nameIn.value) enter(preset);
+}
 })();
 </script>
 </body>
