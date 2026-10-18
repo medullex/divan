@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#141012">
 <title>Общий диван</title>
-<meta name="description" content="Смотрите видео вместе: ведущий включает видео, и оно появляется у всех в комнате.">
+<meta name="description" content="Смотрите фильмы вместе: поиск по Rutube, VK Видео по ссылке, общая пауза, чат и реакции.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='22' width='52' height='26' rx='8' fill='%23f5a742'/%3E%3Crect x='12' y='14' width='40' height='16' rx='6' fill='%23d9707f'/%3E%3Crect x='10' y='46' width='6' height='8' rx='2' fill='%23f5a742'/%3E%3Crect x='48' y='46' width='6' height='8' rx='2' fill='%23f5a742'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
@@ -99,6 +99,26 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
 .hint{color:var(--muted);font-size:13px;margin:0}
 .chatform{display:flex;gap:8px;padding:10px;border-top:1px solid var(--line)}
 .chatform input{flex:1}
+
+/* выбор видео (только у ведущего) */
+.picker{background:var(--seat);border:1px solid var(--line);border-radius:6px;padding:12px;display:flex;flex-direction:column;gap:10px}
+.picker form{display:flex;gap:8px}
+.picker form input{flex:1}
+.pickopts{display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted)}
+.pickopts label{display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.linkish{color:var(--lamp);text-decoration:underline;cursor:pointer}
+.results{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:360px;overflow-y:auto}
+.results li{display:flex;gap:10px;align-items:center;padding:6px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+.results li:hover,.results li:focus-visible{border-color:var(--lamp);background:color-mix(in srgb,var(--lamp) 7%,transparent);outline:none}
+.results img{width:112px;aspect-ratio:16/9;object-fit:cover;border-radius:4px;background:#000;flex:none}
+.rinfo{min-width:0;display:flex;flex-direction:column;gap:2px}
+.rtitle{font-weight:500;font-size:14px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.rmeta{font:400 12px var(--mono);color:var(--muted);display:flex;gap:8px;flex-wrap:wrap}
+.badge{font:600 10px var(--mono);padding:1px 6px;border-radius:999px;border:1px solid var(--line)}
+.badge.adult{color:var(--rose);border-color:color-mix(in srgb,var(--rose) 50%,transparent)}
+.badge.off{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
+.embed{position:absolute;inset:0;background:#000}
+.embed iframe{width:100%;height:100%;border:0;display:block}
 </style>
 </head>
 <body>
@@ -108,7 +128,7 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
   <header><h1>Общий <span>диван</span></h1></header>
   <section class="lobby">
     <h2>Смотрите кино вместе, <span>где бы вы ни были</span></h2>
-    <p>Создайте комнату и отправьте ссылку друзьям. Вы выбираете видео на своём устройстве, и оно сразу появляется у всех в комнате.</p>
+    <p>Создайте комнату и отправьте ссылку друзьям. Найдите фильм на Rutube или вставьте ссылку на VK Видео — он откроется у всех, с общей паузой и перемоткой.</p>
     <div class="field">
       <label for="nameIn">Ваше имя</label>
       <input type="text" id="nameIn" maxlength="24" placeholder="Например, Аня" autocomplete="nickname">
@@ -127,7 +147,7 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
     <ol class="steps">
       <li><b>1</b><span>Создайте комнату — вы станете ведущим.</span></li>
       <li><b>2</b><span>Скиньте друзьям ссылку на комнату.</span></li>
-      <li><b>3</b><span>Выберите видео — оно появится у всех. Пауза и перемотка у ведущего действуют на всех.</span></li>
+      <li><b>3</b><span>Введите название фильма и выберите его — он появится у всех. Пауза и перемотка ведущего действуют на всех.</span></li>
     </ol>
   </section>
 </div>
@@ -141,8 +161,21 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
 
   <main>
     <section class="stage">
+      <div class="picker" id="picker" hidden>
+        <form id="searchForm">
+          <input type="text" id="searchIn" placeholder="Название фильма или ссылка на Rutube / VK Видео" autocomplete="off" enterkeyhint="search">
+          <button class="btn" type="submit" id="searchBtn">Найти</button>
+        </form>
+        <div class="pickopts">
+          <label><input type="checkbox" id="longOnly" checked> только длинные видео (от 40 минут)</label>
+          <label class="linkish" for="pick" tabindex="0">или показать файл с компьютера</label>
+        </div>
+        <p class="hint" id="searchMsg">Поиск идёт по Rutube. Видео из VK Видео вставьте ссылкой.</p>
+        <ul class="results" id="results"></ul>
+      </div>
       <div class="screen">
         <video id="vid" playsinline></video>
+        <div class="embed" id="embedBox" hidden></div>
         <div class="empty" id="empty">
           <strong id="emptyTitle">Подключаемся…</strong>
           <p id="emptyText"></p>
@@ -152,11 +185,11 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
         <div class="floaters" id="floaters"></div>
         <div class="toast" id="toast" style="opacity:0"></div>
         <div class="bottombar" id="soundbar" hidden><button class="btn" id="soundBtn" type="button">Включить звук</button></div>
+        <div class="bottombar" id="joinbar" hidden><button class="btn" id="joinBtn" type="button">Смотреть вместе</button></div>
       </div>
       <input type="file" id="pick" accept="video/*,.mkv" hidden>
 
       <div class="bar">
-        <label class="btn ghost" for="pick" tabindex="0" id="pickBtn" hidden>Выбрать видео</label>
         <span class="file" id="fname"></span>
         <div class="reacts" id="reacts">
           <button type="button" data-e="😂" aria-label="Смешно">😂</button>
@@ -270,6 +303,7 @@ function handle(m){
       break;
     case 'room': onRoom(m); break;
     case 'signal': onSignal(m.from, m.data); break;
+    case 'sync': onSync(m); break;
     case 'control':
       toast('Ведущий: ' + (m.playing ? '▶ ' : '❚❚ ') + fmt(m.pos) + (m.dur ? ' / ' + fmt(m.dur) : ''));
       break;
@@ -297,6 +331,7 @@ function onRoom(m){
     if (!live) { closeAll(); clearRemote(); }
     else armWaitTimer();
   }
+  handleMedia(m.media || null, m.state);
   renderRole(); renderPeople();
 }
 
@@ -423,18 +458,247 @@ v.addEventListener('play', sendControl);
 v.addEventListener('pause', () => { if (!v.ended) sendControl(); });
 v.addEventListener('seeked', sendControl);
 
+/* ---------- плееры Rutube и VK Видео ---------- */
+let media = null, mediaKey = '', player = null, joined = false, joinedOnce = false;
+let lastState = null, embApplying = false, embTimer = null, hbTimer = null;
+const box = $('#embedBox');
+const keyOf = m => m ? m.kind + ':' + (m.id || (m.oid + '_' + m.vid)) + ':' + m.n : '';
+
+function makeFrame(src){
+  const f = document.createElement('iframe');
+  f.src = src; f.allowFullscreen = true;
+  f.allow = 'autoplay; fullscreen; encrypted-media; picture-in-picture; clipboard-write';
+  box.replaceChildren(f);
+  return f;
+}
+
+// Rutube: управление через postMessage (официальный встраиваемый плеер)
+function rutubePlayer(id, onEvent){
+  const f = makeFrame('https://rutube.ru/play/embed/' + id + '/?skinColor=f5a742');
+  let ready = false, playing = false, t = 0, tAt = performance.now();
+  const queue = [];
+  const send = (type, data = {}) => {
+    const msg = JSON.stringify({ type, data });
+    if (ready && f.contentWindow) f.contentWindow.postMessage(msg, '*'); else queue.push(msg);
+  };
+  const onMsg = e => {
+    if (e.source !== f.contentWindow) return;
+    let m; try { m = typeof e.data === 'string' ? JSON.parse(e.data) : e.data; } catch { return; }
+    if (!m || !m.type) return;
+    const d = m.data || {};
+    if (m.type === 'player:ready'){ ready = true; for (const q of queue.splice(0)) f.contentWindow.postMessage(q, '*'); onEvent('ready'); }
+    else if (m.type === 'player:currentTime'){ const nt = typeof d.time === 'number' ? d.time : d.currentTime; if (typeof nt === 'number'){ t = nt; tAt = performance.now(); } }
+    else if (m.type === 'player:changeState'){
+      if (d.state === 'playing'){ playing = true; tAt = performance.now(); onEvent('play'); }
+      else if (d.state === 'pause'){ playing = false; onEvent('pause'); }
+      else if (d.state === 'seeked'){ onEvent('seek'); }
+      else if (d.state === 'completed'){ playing = false; onEvent('ended'); }
+    }
+  };
+  addEventListener('message', onMsg);
+  return {
+    play(){ send('player:play'); },
+    pause(){ send('player:pause'); },
+    seek(s){ send('player:setCurrentTime', { time: s }); t = s; tAt = performance.now(); },
+    time(){ return playing ? t + (performance.now() - tAt) / 1000 : t; },
+    isPlaying(){ return playing; },
+    destroy(){ removeEventListener('message', onMsg); f.remove(); },
+  };
+}
+
+// VK Видео: официальный JS API плеера
+let vkApi = null;
+function loadVkApi(){
+  if (window.VK && VK.VideoPlayer) return Promise.resolve();
+  if (!vkApi) vkApi = new Promise((res, rej) => {
+    const s = document.createElement('script'); s.src = 'https://vk.com/js/api/videoplayer.js';
+    s.onload = res; s.onerror = () => { vkApi = null; rej(new Error('vk api')); }; document.head.append(s);
+  });
+  return vkApi;
+}
+function vkPlayer(m, onEvent){
+  const f = makeFrame('https://vkvideo.ru/video_ext.php?oid=' + encodeURIComponent(m.oid) + '&id=' + encodeURIComponent(m.vid) +
+    (m.hash ? '&hash=' + encodeURIComponent(m.hash) : '') + '&hd=2&js_api=1');
+  let p = null, dead = false;
+  loadVkApi().then(() => {
+    if (dead) return;
+    p = VK.VideoPlayer(f);
+    p.on('inited', () => onEvent('ready'));
+    p.on('started', () => onEvent('play'));
+    p.on('resumed', () => onEvent('play'));
+    p.on('paused', () => onEvent('pause'));
+    p.on('seeked', () => onEvent('seek'));
+    p.on('ended', () => onEvent('ended'));
+    p.on('error', () => onEvent('error'));
+  }).catch(() => toast('Не удалось загрузить плеер VK. Проверьте, открывается ли vk.com.', 5000));
+  return {
+    play(){ try { p && p.play(); } catch {} },
+    pause(){ try { p && p.pause(); } catch {} },
+    seek(s){ try { p && p.seek(s); } catch {} },
+    time(){ try { return (p && p.getCurrentTime()) || 0; } catch { return 0; } },
+    isPlaying(){ try { return !!p && p.getState() === 'playing'; } catch { return false; } },
+    destroy(){ dead = true; try { p && p.destroy(); } catch {} f.remove(); },
+  };
+}
+
+function handleMedia(m, st){
+  if (st) lastState = { playing: st.playing, pos: st.pos, at: performance.now() };
+  const k = keyOf(m);
+  if (k === mediaKey) { media = m; return; }
+  mediaKey = k; media = m;
+  unmountPlayer();
+  if (!m) return;
+  // при переходе на Rutube/VK выключаем показ файла
+  if (amHost() && stream) { out({ t:'live', on:false }); stopHosting(); closeAll(); }
+  clearRemote(); v.pause(); v.hidden = true; box.hidden = false;
+  joined = amHost() || joinedOnce;
+  player = m.kind === 'vk' ? vkPlayer(m, onPlayerEvent) : rutubePlayer(m.id, onPlayerEvent);
+  clearInterval(hbTimer);
+  hbTimer = setInterval(() => { if (amHost() && player) sendSync(false); }, 3000);
+}
+function unmountPlayer(){
+  clearInterval(hbTimer);
+  if (player) { player.destroy(); player = null; }
+  box.replaceChildren(); box.hidden = true; v.hidden = false;
+  $('#joinbar').hidden = true;
+}
+
+function expectedPos(){
+  if (!lastState) return 0;
+  return lastState.pos + (lastState.playing ? (performance.now() - lastState.at) / 1000 : 0);
+}
+function holdEmb(){ embApplying = true; clearTimeout(embTimer); embTimer = setTimeout(() => embApplying = false, 1200); }
+function applyState(strict){
+  if (!player || !lastState || amHost() || !joined) return;
+  holdEmb();
+  const target = expectedPos();
+  if (Math.abs(player.time() - target) > (strict ? 1 : 2.5)) player.seek(target);
+  if (lastState.playing && !player.isPlaying()) player.play();
+  if (!lastState.playing && player.isPlaying()) player.pause();
+}
+function sendSync(ev){
+  if (!player || !amHost()) return;
+  out({ t:'sync', playing: player.isPlaying(), pos: player.time(), ev: !!ev });
+}
+let evTimer = null;
+function onPlayerEvent(ev){
+  if (ev === 'error' && media && media.kind === 'vk'){
+    toast('VK не дал показать это видео. Вставьте «Код для вставки» из меню видео (Поделиться → Экспортировать).', 7000);
+    return;
+  }
+  if (amHost()){
+    if (ev === 'play' || ev === 'pause' || ev === 'seek' || ev === 'ended'){
+      // даём плееру обновить время и только потом рассылаем
+      clearTimeout(evTimer); evTimer = setTimeout(() => sendSync(true), 300);
+    }
+    return;
+  }
+  if (ev === 'ready') { applyState(true); return; }
+  if (ev === 'play' && !joined) { joined = joinedOnce = true; $('#joinbar').hidden = true; applyState(true); }
+}
+function onSync(m){
+  lastState = { playing: m.playing, pos: m.pos, at: performance.now() };
+  if (!amHost()) {
+    applyState(!!m.ev);
+    if (m.ev) toast('Ведущий: ' + (m.playing ? '▶ ' : '❚❚ ') + fmt(m.pos));
+  }
+}
+$('#joinBtn').addEventListener('click', () => {
+  joined = joinedOnce = true; $('#joinbar').hidden = true;
+  applyState(true);
+});
+
+/* ---------- поиск фильма (ведущий) ---------- */
+function parseLink(s){
+  let m = s.match(/rutube\.ru\/(?:video\/private|video|play\/embed|shorts)\/([0-9a-f]{32})/i);
+  if (m) return { kind:'rutube', id: m[1].toLowerCase() };
+  m = s.match(/video_ext\.php\?[^"'\s<>]*?oid=(-?\d+)[^"'\s<>]*?[?&]id=(\d+)/i);
+  if (m) {
+    const h = s.match(/[?&](?:amp;)?hash=([0-9a-f]+)/i);
+    return { kind:'vk', oid: m[1], vid: m[2], hash: h ? h[1] : '' };
+  }
+  m = s.match(/(?:vk\.com|vk\.ru|vkvideo\.ru)\/[^\s]*?video(-?\d+)_(\d+)/i);
+  if (m) return { kind:'vk', oid: m[1], vid: m[2], hash: '' };
+  return null;
+}
+async function choose(item){
+  if (!amHost()) return;
+  let it = { ...item };
+  if (it.kind === 'rutube' && !it.title) {
+    try { const r = await fetch('/api/rutube?id=' + it.id); if (r.ok) it = { ...it, ...(await r.json()) }; } catch {}
+  }
+  if (!it.title) it.title = it.kind === 'vk' ? 'Видео из VK' : 'Видео с Rutube';
+  out({ t:'media', kind: it.kind, id: it.id, oid: it.oid, vid: it.vid, hash: it.hash, title: it.title, dur: it.dur || 0 });
+  $('#results').replaceChildren(); $('#searchIn').value = '';
+  $('#searchMsg').textContent = 'Включено: ' + it.title + '. Нажмите ▶ в плеере — у всех начнётся одновременно.';
+}
+let lastResults = [];
+function renderResults(){
+  const ul = $('#results'); ul.replaceChildren();
+  const list = $('#longOnly').checked ? lastResults.filter(r => r.dur >= 2400) : lastResults;
+  if (!lastResults.length) return;
+  if (!list.length){ $('#searchMsg').textContent = 'Длинных видео не нашлось. Снимите галочку «только длинные» или уточните название.'; return; }
+  $('#searchMsg').textContent = 'Найдено: ' + list.length + '. Нажмите на видео, чтобы включить его всем.';
+  for (const r of list.slice(0, 60)){
+    const li = document.createElement('li'); li.tabIndex = 0;
+    const img = document.createElement('img'); img.loading = 'lazy'; img.alt = ''; img.referrerPolicy = 'no-referrer';
+    if (r.thumb) img.src = r.thumb;
+    const info = document.createElement('div'); info.className = 'rinfo';
+    const t = document.createElement('div'); t.className = 'rtitle'; t.textContent = r.title;
+    const meta = document.createElement('div'); meta.className = 'rmeta';
+    const d = document.createElement('span'); d.textContent = fmt(r.dur); meta.append(d);
+    if (r.author){ const a = document.createElement('span'); a.textContent = r.author; meta.append(a); }
+    if (r.official){ const b = document.createElement('span'); b.className = 'badge off'; b.textContent = 'официальный'; meta.append(b); }
+    if (r.age >= 18){ const b = document.createElement('span'); b.className = 'badge adult'; b.textContent = '18+'; meta.append(b); }
+    info.append(t, meta); li.append(img, info);
+    li.addEventListener('click', () => choose(r));
+    li.addEventListener('keydown', e => { if (e.key === 'Enter') choose(r); });
+    ul.append(li);
+  }
+}
+$('#longOnly').addEventListener('change', renderResults);
+$('#searchForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const q = $('#searchIn').value.trim(); if (!q) return;
+  const link = parseLink(q);
+  if (link) { choose(link); return; }
+  if (/^https?:\/\//i.test(q)) { $('#searchMsg').textContent = 'Эта ссылка не похожа на видео Rutube или VK Видео.'; return; }
+  $('#searchMsg').textContent = 'Ищем на Rutube…'; $('#results').replaceChildren(); $('#searchBtn').disabled = true;
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Ошибка поиска');
+    lastResults = j.results || [];
+    if (!lastResults.length) $('#searchMsg').textContent = 'Ничего не нашлось. Попробуйте другое название.';
+    else renderResults();
+  } catch (err) {
+    $('#searchMsg').textContent = err.message || 'Поиск не удался, попробуйте ещё раз.';
+  } finally { $('#searchBtn').disabled = false; }
+});
+
 /* ---------- отрисовка ---------- */
 function nameOf(id){ return (peers.find(p => p.id === id) || {}).name || 'ведущий'; }
 function renderRole(){
   const host = amHost();
-  $('#pickBtn').hidden = !host;
+  $('#picker').hidden = !host;
+  if (media){
+    // идёт видео с Rutube / VK Видео
+    $('#empty').hidden = true;
+    $('#fname').textContent = media.title || '';
+    $('#roleNote').textContent = host
+      ? 'Вы ведущий. Ваши пауза и перемотка действуют на всех. Видео показывается через официальный плеер ' + (media.kind === 'vk' ? 'VK Видео' : 'Rutube') + '.'
+      : 'Ведущий — ' + nameOf(hostId) + '. Пауза и перемотка у вас меняются вместе с ним.';
+    $('#joinbar').hidden = host || joined;
+    return;
+  }
+  $('#joinbar').hidden = true;
   if (host){
     $('#roleNote').textContent = 'Вы ведущий. Выбранное видео появится у всех в комнате, ваши пауза и перемотка действуют на всех. Видео идёт напрямую с вашего устройства, не закрывайте вкладку.';
     if (!v.src){
       $('#empty').hidden = false;
-      $('#emptyTitle').textContent = canHost ? 'Выберите видео для показа' : 'Откройте сайт в Chrome, Edge или Яндекс Браузере';
-      $('#emptyText').textContent = canHost ? 'Файл с вашего устройства сразу появится у всех в комнате.' : 'Этот браузер не умеет показывать видео другим. Смотреть в нём можно, а вести — нет.';
-      $('#emptyPick').hidden = !canHost; $('#retryBtn').hidden = true;
+      $('#emptyTitle').textContent = 'Найдите фильм в строке выше';
+      $('#emptyText').textContent = 'Он откроется у всех в комнате. Можно вставить ссылку на Rutube или VK Видео' + (canHost ? ', или показать файл со своего компьютера.' : '.');
+      $('#emptyPick').hidden = true; $('#retryBtn').hidden = true;
     }
   } else {
     $('#roleNote').textContent = 'Ведущий — ' + nameOf(hostId) + '. Видео, пауза и перемотка у вас меняются вместе с ним.';
