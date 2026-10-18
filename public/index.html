@@ -130,6 +130,38 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
 .badge.adult{color:var(--rose);border-color:color-mix(in srgb,var(--rose) 50%,transparent)}
 .badge.off{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 50%,transparent)}
 .embed{position:absolute;inset:0;background:#000}
+
+/* аватарки */
+.avpick,.colpick{display:flex;flex-wrap:wrap;gap:6px}
+.avpick button{width:40px;height:40px;border-radius:50%;border:2px solid transparent;background:var(--seat);font-size:20px;cursor:pointer;padding:0;line-height:1}
+.avpick button[aria-pressed="true"]{border-color:var(--fg)}
+.colpick button{width:28px;height:28px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
+.colpick button[aria-pressed="true"]{border-color:var(--fg);box-shadow:0 0 0 2px var(--bg) inset}
+.ava.emo{font-size:14px;font-family:system-ui,sans-serif}
+.mepreview .ava.emo{font-size:20px}
+.mepreview{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--muted)}
+.mepreview .ava{width:36px;height:36px;font-size:18px}
+input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:10px 14px;font:15px var(--body)}
+
+/* очередь */
+.queue{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto}
+.queue li{display:flex;gap:8px;align-items:center;min-width:0;font-size:13px}
+.queue img{width:56px;aspect-ratio:16/9;object-fit:cover;border-radius:3px;background:#000;flex:none}
+.queue .qi{min-width:0;flex:1;display:flex;flex-direction:column}
+.queue .qt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.queue .qm{font:400 11px var(--mono);color:var(--muted)}
+.qbtn{background:none;border:1px solid var(--line);color:var(--fg);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 7px;flex:none}
+.qbtn:hover{border-color:var(--lamp)}
+.addq{margin-left:auto;flex:none}
+.lockchip{font:500 11px var(--mono);color:var(--lamp)}
+
+/* вход в комнату с паролем */
+.gate{max-width:420px;margin:8vh auto 0;display:flex;flex-direction:column;gap:14px;text-align:center}
+.gate h2{font:700 24px/1.2 var(--display);margin:0}
+.gate form{display:flex;gap:8px}
+.gate input{flex:1}
+.passform{display:flex;gap:8px;flex-wrap:wrap;width:100%}
+.passform input{flex:1 1 180px}
 .embed iframe{width:100%;height:100%;border:0;display:block}
 </style>
 </head>
@@ -144,6 +176,16 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
     <div class="field">
       <label for="nameIn">Ваше имя</label>
       <input type="text" id="nameIn" maxlength="24" placeholder="Например, Аня" autocomplete="nickname">
+    </div>
+    <div class="field">
+      <label>Аватарка и цвет</label>
+      <div class="mepreview"><span class="ava" id="mePrev"></span><span>Так вас увидят в комнате</span></div>
+      <div class="avpick" id="avPick"></div>
+      <div class="colpick" id="colPick"></div>
+    </div>
+    <div class="field">
+      <label for="passIn">Пароль на новую комнату (необязательно)</label>
+      <input type="password" id="passIn" maxlength="64" placeholder="Без пароля войдёт любой, у кого есть ссылка" autocomplete="new-password">
     </div>
     <div class="row">
       <button class="btn" id="createBtn" type="button">Создать комнату</button>
@@ -176,7 +218,17 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
     <div class="status"><span class="dot" id="dot"></span><span id="conn">подключение…</span></div>
   </header>
 
-  <main>
+  <section class="gate" id="gate" hidden>
+    <h2>🔒 Комната с паролем</h2>
+    <p class="hint">Спросите пароль у того, кто прислал ссылку.</p>
+    <form id="gateForm">
+      <input type="password" id="gateIn" maxlength="64" placeholder="Пароль" autocomplete="current-password">
+      <button class="btn" type="submit">Войти</button>
+    </form>
+    <p class="err" id="gateErr" role="alert"></p>
+  </section>
+
+  <main id="hallMain">
     <section class="stage">
       <div class="picker" id="picker" hidden>
         <form id="searchForm">
@@ -220,6 +272,12 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
       <div class="invite">
         <code id="inviteLink"></code>
         <button class="btn ghost" id="copyBtn" type="button">Скопировать ссылку</button>
+        <button class="btn ghost" id="passToggle" type="button" hidden>🔓 Пароль</button>
+        <form class="passform" id="passForm" hidden>
+          <input type="password" id="passNew" maxlength="64" placeholder="Новый пароль на комнату" autocomplete="new-password">
+          <button class="btn" type="submit">Сохранить</button>
+          <button class="btn ghost" type="button" id="passOff" hidden>Убрать пароль</button>
+        </form>
       </div>
       <p class="note" id="roleNote"></p>
     </section>
@@ -228,6 +286,11 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
       <div class="sec">
         <p class="label">В зале</p>
         <ul class="people" id="people"></ul>
+      </div>
+      <div class="sec">
+        <p class="label">Очередь <span id="qCount"></span></p>
+        <ul class="queue" id="queue"></ul>
+        <button class="btn ghost small" id="nextBtn" type="button" hidden style="margin-top:8px">Следующее ▶▶</button>
       </div>
       <div class="chat" id="chat" aria-live="polite"></div>
       <form class="chatform" id="chatform">
@@ -253,6 +316,31 @@ const canHost = !!(HTMLMediaElement.prototype.captureStream || HTMLMediaElement.
 /* ---------- лобби ---------- */
 const nameIn = $('#nameIn');
 nameIn.value = store.get('divan-name') || '';
+const AVATARS = ['🐱','🐶','🦊','🐼','🐸','🐵','🦁','🐯','🐨','🐰','🦄','🐙','👽','🤖','👻','💀','🎃','🍕','🍿','🎬','⭐','🔥','🌚','😎'];
+const PALETTE = ['#f5a742','#d9707f','#7cc59a','#8fb3e8','#c9a0e8','#e8d27c','#6fd0c8','#f08a5d','#e86a6a','#9ad66b'];
+let myEmoji = store.get('divan-emoji'); if (!AVATARS.includes(myEmoji)) myEmoji = AVATARS[Math.floor(Math.random()*AVATARS.length)];
+let myColor = store.get('divan-color'); if (!PALETTE.includes(myColor)) myColor = PALETTE[Math.floor(Math.random()*PALETTE.length)];
+function paintAva(el, emoji, color, name){
+  el.style.background = color || 'var(--muted)';
+  el.textContent = emoji || (name || '?').slice(0,1).toUpperCase();
+  el.classList.toggle('emo', !!emoji);
+}
+function renderMe(){
+  paintAva($('#mePrev'), myEmoji, myColor);
+  for (const b of $('#avPick').children) b.setAttribute('aria-pressed', b.dataset.v === myEmoji);
+  for (const b of $('#colPick').children) b.setAttribute('aria-pressed', b.dataset.v === myColor);
+}
+for (const a of AVATARS){
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = a; b.dataset.v = a; b.setAttribute('aria-label', 'Аватарка ' + a);
+  b.addEventListener('click', () => { myEmoji = a; store.set('divan-emoji', a); renderMe(); });
+  $('#avPick').append(b);
+}
+for (const c of PALETTE){
+  const b = document.createElement('button'); b.type = 'button'; b.dataset.v = c; b.style.background = c; b.setAttribute('aria-label', 'Цвет ' + c);
+  b.addEventListener('click', () => { myColor = c; store.set('divan-color', c); renderMe(); });
+  $('#colPick').append(b);
+}
+renderMe();
 const roomFromUrl = () => {
   const m = location.pathname.match(/^\/r\/([a-z0-9-]{3,32})\/?$/);
   return m ? m[1] : (new URLSearchParams(location.search).get('r') || '').toLowerCase();
@@ -262,7 +350,9 @@ const newCode = () => {
   let s=''; for (const x of crypto.getRandomValues(new Uint8Array(8))) s += a[x % a.length];
   return s.slice(0,4)+'-'+s.slice(4);
 };
-function enter(code){
+let myPass = '';
+function enter(code, pass){
+  myPass = pass || '';
   const name = nameIn.value.trim();
   if (!name){ $('#lobbyErr').textContent = 'Введите имя, чтобы друзья вас узнали.'; nameIn.focus(); return; }
   if (!/^[a-z0-9-]{3,32}$/.test(code)){ $('#lobbyErr').textContent = 'Код комнаты: латинские буквы, цифры и дефис.'; return; }
@@ -271,7 +361,10 @@ function enter(code){
   $('#lobby').hidden = true; $('#hall').hidden = false;
   startRoom(code, name);
 }
-$('#createBtn').addEventListener('click', () => enter(roomFromUrl() || newCode()));
+$('#createBtn').addEventListener('click', () => {
+  const preset = roomFromUrl();
+  enter(preset || newCode(), preset ? '' : $('#passIn').value.trim());
+});
 $('#joinCodeBtn').addEventListener('click', () => {
   let c = $('#codeIn').value.trim().toLowerCase();
   const m = c.match(/\/r\/([a-z0-9-]+)/); if (m) c = m[1];
@@ -281,7 +374,7 @@ $('#codeIn').addEventListener('keydown', e => { if (e.key==='Enter') $('#joinCod
 nameIn.addEventListener('keydown', e => { if (e.key==='Enter') $('#createBtn').click(); });
 /* ---------- состояние ---------- */
 let ws = null, myId = null, roomCode = null, myName = '', retry = 0;
-let hostId = null, live = null, peers = [], chat = [];
+let hostId = null, live = null, peers = [], chat = [], queue = [], locked = false;
 let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 const pcs = new Map();      // ведущий: id зрителя -> соединение; зритель: id ведущего -> соединение
 const pcState = {};         // id -> состояние соединения (для списка зрителей)
@@ -299,7 +392,7 @@ function connect(){
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws');
   setConn(false, 'подключение…');
-  ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ t:'hello', room:roomCode, name:myName })); };
+  ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ t:'hello', room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
   ws.onclose = () => {
     setConn(false, 'нет связи, переподключаюсь…');
@@ -313,7 +406,14 @@ function setConn(ok, text){ $('#dot').classList.toggle('on', ok); $('#conn').tex
 
 function handle(m){
   switch (m.t){
+    case 'needpass':
+      $('#hallMain').hidden = true; $('#gate').hidden = false;
+      setConn(false, 'нужен пароль');
+      $('#gateErr').textContent = m.wrong ? 'Неверный пароль. Попробуйте ещё раз.' : '';
+      $('#gateIn').value = ''; $('#gateIn').focus();
+      break;
     case 'welcome':
+      $('#gate').hidden = true; $('#hallMain').hidden = false;
       myId = m.id; chat = m.chat || []; renderChat();
       setConn(true, 'комната ' + roomCode);
       onRoom(m);
@@ -326,13 +426,14 @@ function handle(m){
       break;
     case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); break;
     case 'react': floatEmoji(m.e); break;
-    case 'error': setConn(false, m.text); break;
+    case 'error': if (myId) toast(m.text, 4000); else setConn(false, m.text); break;
   }
 }
 
 function onRoom(m){
   const prevHost = hostId;
   hostId = m.hostId; live = m.live; peers = m.peers || [];
+  queue = m.queue || []; locked = !!m.locked;
   if (prevHost !== hostId){
     // сменился ведущий: всё начинаем заново
     closeAll();
@@ -349,7 +450,7 @@ function onRoom(m){
     else armWaitTimer();
   }
   handleMedia(m.media || null, m.state);
-  renderRole(); renderPeople();
+  renderRole(); renderPeople(); renderQueue(); renderLock();
 }
 
 /* ---------- WebRTC ---------- */
@@ -604,6 +705,7 @@ function onPlayerEvent(ev){
     return;
   }
   if (amHost()){
+    if (ev === 'ended' && queue.length) { out({ t:'next' }); return; }
     if (ev === 'play' || ev === 'pause' || ev === 'seek' || ev === 'ended'){
       // даём плееру обновить время и только потом рассылаем
       clearTimeout(evTimer); evTimer = setTimeout(() => sendSync(true), 300);
@@ -638,14 +740,21 @@ function parseLink(s){
   if (m) return { kind:'vk', oid: m[1], vid: m[2], hash: '' };
   return null;
 }
-async function choose(item){
-  if (!amHost()) return;
+async function choose(item, toQueue){
   let it = { ...item };
+  const queueIt = toQueue || !amHost();
   if (it.kind === 'rutube' && !it.title) {
     try { const r = await fetch('/api/rutube?id=' + it.id); if (r.ok) it = { ...it, ...(await r.json()) }; } catch {}
   }
   if (!it.title) it.title = it.kind === 'vk' ? 'Видео из VK' : 'Видео с Rutube';
-  out({ t:'media', kind: it.kind, id: it.id, oid: it.oid, vid: it.vid, hash: it.hash, title: it.title, dur: it.dur || 0 });
+  const payload = { kind: it.kind, id: it.id, oid: it.oid, vid: it.vid, hash: it.hash, title: it.title, dur: it.dur || 0, thumb: it.thumb || '' };
+  if (queueIt){
+    out({ t:'qadd', ...payload });
+    toast('Добавлено в очередь: ' + it.title);
+    if (!amHost()) { $('#searchMsg').textContent = 'Добавлено в очередь. Ведущий включит, когда дойдёт черёд.'; }
+    return;
+  }
+  out({ t:'media', ...payload });
   $('#results').replaceChildren(); $('#searchIn').value = '';
   $('#searchMsg').textContent = 'Включено: ' + it.title + '. Нажмите ▶ в плеере — у всех начнётся одновременно.';
 }
@@ -668,7 +777,13 @@ function renderResults(){
     if (r.official){ const b = document.createElement('span'); b.className = 'badge off'; b.textContent = 'официальный'; meta.append(b); }
     if (r.age >= 18){ const b = document.createElement('span'); b.className = 'badge adult'; b.textContent = '18+'; meta.append(b); }
     info.append(t, meta); li.append(img, info);
+    li.title = amHost() ? 'Включить сейчас' : 'Предложить в очередь';
     li.addEventListener('click', () => choose(r));
+    if (amHost()){
+      const q = document.createElement('button'); q.type = 'button'; q.className = 'qbtn addq'; q.textContent = '+ В очередь';
+      q.addEventListener('click', e => { e.stopPropagation(); choose(r, true); });
+      li.append(q);
+    }
     li.addEventListener('keydown', e => { if (e.key === 'Enter') choose(r); });
     ul.append(li);
   }
@@ -693,11 +808,74 @@ $('#searchForm').addEventListener('submit', async e => {
   } finally { $('#searchBtn').disabled = false; }
 });
 
+/* ---------- очередь ---------- */
+function renderQueue(){
+  const ul = $('#queue'); ul.replaceChildren();
+  $('#qCount').textContent = queue.length ? '(' + queue.length + ')' : '';
+  $('#nextBtn').hidden = !(amHost() && queue.length);
+  if (!queue.length){
+    const li = document.createElement('li'); li.className = 'hint';
+    li.textContent = 'Пусто. Найдите видео и добавьте его в очередь.';
+    ul.append(li); return;
+  }
+  queue.forEach((q, i) => {
+    const li = document.createElement('li');
+    const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+    if (q.thumb) img.src = q.thumb;
+    const info = document.createElement('div'); info.className = 'qi';
+    const t = document.createElement('span'); t.className = 'qt'; t.textContent = (i + 1) + '. ' + q.title; t.title = q.title;
+    const m = document.createElement('span'); m.className = 'qm';
+    m.textContent = (q.dur ? fmt(q.dur) + ' · ' : '') + (q.kind === 'vk' ? 'VK' : 'Rutube') + ' · ' + (q.by === myId ? 'вы' : (q.byName || ''));
+    info.append(t, m); li.append(img, info);
+    const btn = (txt, title, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'qbtn'; b.textContent = txt; b.title = title; b.addEventListener('click', fn); li.append(b); };
+    if (amHost()){
+      btn('▶', 'Включить сейчас', () => out({ t:'qplay', qid: q.qid }));
+      if (i > 0) btn('↑', 'Выше', () => out({ t:'qmove', qid: q.qid }));
+    }
+    if (amHost() || q.by === myId) btn('✕', 'Убрать из очереди', () => out({ t:'qdel', qid: q.qid }));
+    ul.append(li);
+  });
+}
+$('#nextBtn').addEventListener('click', () => out({ t:'next' }));
+
+/* ---------- пароль на комнату ---------- */
+function renderLock(){
+  const host = amHost();
+  $('#passToggle').hidden = !host;
+  $('#passToggle').textContent = locked ? '🔒 Пароль' : '🔓 Пароль';
+  $('#passOff').hidden = !locked;
+  if (!host) $('#passForm').hidden = true;
+  $('#conn').textContent = myId ? ('комната ' + roomCode + (locked ? ' 🔒' : '')) : $('#conn').textContent;
+}
+$('#passToggle').addEventListener('click', () => { $('#passForm').hidden = !$('#passForm').hidden; if (!$('#passForm').hidden) $('#passNew').focus(); });
+$('#passForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const p = $('#passNew').value.trim(); if (!p) return;
+  out({ t:'setpass', pass: p }); myPass = p;
+  $('#passNew').value = ''; $('#passForm').hidden = true;
+  toast('Пароль установлен. Скажите его друзьям — ссылка без пароля больше не пустит.', 4000);
+});
+$('#passOff').addEventListener('click', () => {
+  out({ t:'setpass', pass: '' }); myPass = '';
+  $('#passForm').hidden = true; toast('Пароль снят');
+});
+$('#gateForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const p = $('#gateIn').value.trim(); if (!p) return;
+  myPass = p;
+  out({ t:'hello', room: roomCode, name: myName, emoji: myEmoji, color: myColor, pass: p });
+});
+
 /* ---------- отрисовка ---------- */
 function nameOf(id){ return (peers.find(p => p.id === id) || {}).name || 'ведущий'; }
 function renderRole(){
   const host = amHost();
-  $('#picker').hidden = !host;
+  $('#picker').hidden = false;
+  $('#searchMsg').dataset.role = host ? 'host' : 'guest';
+  if (!$('#results').children.length) $('#searchMsg').textContent = host
+    ? 'Поиск идёт по Rutube. Нажмите на видео — включится у всех; «+ В очередь» — посмотрите следующим. VK Видео вставьте ссылкой.'
+    : 'Найдите видео и нажмите на него — оно попадёт в очередь. Включает ведущий.';
+  document.querySelector('label.linkish[for="pick"]').hidden = !host;
   if (media){
     // идёт видео с Rutube / VK Видео
     $('#empty').hidden = true;
@@ -732,8 +910,8 @@ function renderPeople(){
   const ul = $('#people'); ul.replaceChildren();
   for (const p of peers){
     const li = document.createElement('li');
-    const a = document.createElement('span'); a.className = 'ava'; a.style.background = p.color;
-    a.textContent = (p.name || '?').slice(0,1).toUpperCase();
+    const a = document.createElement('span'); a.className = 'ava';
+    paintAva(a, p.emoji, p.color, p.name);
     const n = document.createElement('span'); n.className = 'pname';
     n.textContent = p.id === myId ? p.name + ' (вы)' : p.name;
     const c = document.createElement('span'); c.className = 'chip';
@@ -790,7 +968,7 @@ function renderChat(){
   if (!chat.length){ const p = document.createElement('p'); p.className='hint'; p.textContent='Сообщений пока нет. Напишите первое.'; box.append(p); return; }
   for (const m of chat){
     const d = document.createElement('div'); d.className = 'msg';
-    const b = document.createElement('b'); b.textContent = m.by === myId ? 'Вы' : m.name; b.style.color = m.color;
+    const b = document.createElement('b'); b.textContent = (m.emoji ? m.emoji + ' ' : '') + (m.by === myId ? 'Вы' : m.name); b.style.color = m.color;
     const t = document.createElement('span'); t.textContent = m.text;
     d.append(b, t); box.append(d);
   }
