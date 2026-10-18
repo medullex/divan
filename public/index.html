@@ -29,6 +29,8 @@ body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{font:700 22px/1.1 var(--display);letter-spacing:-.01em;margin:0}
 h1 span{color:var(--lamp)}
+.home{color:inherit;text-decoration:none}
+.home:hover span{text-decoration:underline}
 .status{font:500 12px var(--mono);color:var(--muted);display:flex;align-items:center;gap:8px}
 .dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .dot.on{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
@@ -125,7 +127,7 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
 
 <!-- ЛОББИ -->
 <div class="wrap" id="lobby">
-  <header><h1>Общий <span>диван</span></h1></header>
+  <header><h1><a href="/" class="home" title="На главную">Общий <span>диван</span></a></h1></header>
   <section class="lobby">
     <h2>Смотрите кино вместе, <span>где бы вы ни были</span></h2>
     <p>Создайте комнату и отправьте ссылку друзьям. Найдите фильм на Rutube или вставьте ссылку на VK Видео — он откроется у всех, с общей паузой и перемоткой.</p>
@@ -155,7 +157,7 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
 <!-- ЗАЛ -->
 <div class="wrap" id="hall" hidden>
   <header>
-    <h1>Общий <span>диван</span></h1>
+    <h1><a href="/" class="home" title="На главную">Общий <span>диван</span></a></h1>
     <div class="status"><span class="dot" id="dot"></span><span id="conn">подключение…</span></div>
   </header>
 
