@@ -48,7 +48,19 @@ const scrypt = (pass, salt) => new Promise((res, rej) =>
 const DUMMY_SALT = crypto.randomBytes(16).toString('hex');
 
 // ---------- пользователи ----------
-const publicUser = (login, u) => ({ login, name: u.name || login, emoji: AVATARS.includes(u.emoji) ? u.emoji : null, color: /^#[0-9a-f]{6}$/i.test(u.color || '') ? u.color : null });
+const publicUser = (login, u) => ({
+  login, name: u.name || login,
+  emoji: AVATARS.includes(u.emoji) ? u.emoji : null,
+  color: /^#[0-9a-f]{6}$/i.test(u.color || '') ? u.color : null,
+  ava: /^\d+$/.test(u.avatar || '') ? '/api/avatar/' + login + '?v=' + u.avatar : null, // своё фото
+});
+const AVA_MAX = 60 * 1024; // фото после сжатия в браузере весит 5–20 КБ
+function imageKind(buf) {
+  if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+  if (buf.length > 12 && buf.toString('latin1', 0, 4) === 'RIFF' && buf.toString('latin1', 8, 12) === 'WEBP') return 'image/webp';
+  if (buf.length > 8 && buf[0] === 0x89 && buf.toString('latin1', 1, 4) === 'PNG') return 'image/png';
+  return null;
+}
 
 async function getUser(login) {
   if (!validLogin(login)) return null;
@@ -56,8 +68,8 @@ async function getUser(login) {
   return u.hash ? u : null;
 }
 async function getUsers(logins) {
-  const rows = await dbMany(logins.map(l => ['HMGET', 'user:' + l, 'name', 'emoji', 'color']));
-  return logins.map((l, i) => publicUser(l, { name: rows[i]?.[0], emoji: rows[i]?.[1], color: rows[i]?.[2] }));
+  const rows = await dbMany(logins.map(l => ['HMGET', 'user:' + l, 'name', 'emoji', 'color', 'avatar']));
+  return logins.map((l, i) => publicUser(l, { name: rows[i]?.[0], emoji: rows[i]?.[1], color: rows[i]?.[2], avatar: rows[i]?.[3] }));
 }
 async function newSession(login) {
   const token = crypto.randomBytes(24).toString('base64url');
@@ -110,6 +122,7 @@ function detach(ws) {
   notifyFriends(login);
   if (!online.has(login)) friendCache.delete(login);
 }
+function refresh(login, u) { for (const ws of online.get(login) || []) ws.user = u; } // новые имя/фото — для следующих входов в комнату
 const isFriend = (a, b) => !!friendCache.get(a)?.has(b);
 function cacheFriend(a, b, on) {
   for (const [x, y] of [[a, b], [b, a]]) { const s = friendCache.get(x); if (s) on ? s.add(y) : s.delete(y); }
@@ -124,10 +137,10 @@ function limited(req, max) {
   if (hits.size > 5000) hits.clear();
   return ++h.n > max;
 }
-function readBody(req) {
+function readBody(req, max = 4096) {
   return new Promise((res, rej) => {
     let size = 0; const parts = [];
-    req.on('data', c => { size += c.length; if (size > 4096) { rej(new Error('big')); req.destroy(); } else parts.push(c); });
+    req.on('data', c => { size += c.length; if (size > max) { rej(new Error('big')); req.destroy(); } else parts.push(c); });
     req.on('end', () => { try { res(JSON.parse(Buffer.concat(parts).toString('utf8') || '{}')); } catch { res({}); } });
     req.on('error', rej);
   });
@@ -145,9 +158,19 @@ async function me(login) {
 }
 
 async function handle(req, res, pathname) {
-  if (!pathname.startsWith('/api/auth/') && !pathname.startsWith('/api/me') && !pathname.startsWith('/api/friends/')) return false;
+  if (!/^\/api\/(auth|me|friends|avatar)(\/|$)/.test(pathname)) return false;
   if (!enabled) { send(res, 503, { error: 'Аккаунты пока не настроены' }); return true; }
   try {
+    const am = pathname.match(/^\/api\/avatar\/([a-z0-9_]{3,20})$/);
+    if (am) { // отдаём фото пользователя
+      const b64 = await db('GET', 'ava:' + am[1]);
+      const buf = b64 ? Buffer.from(b64, 'base64') : null;
+      const type = buf && imageKind(buf);
+      if (!type) { res.writeHead(404, { 'Cache-Control': 'no-store' }); res.end(); return true; }
+      res.writeHead(200, { 'Content-Type': type, 'Content-Length': buf.length, 'Cache-Control': 'public, max-age=604800, immutable', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'" });
+      res.end(buf);
+      return true;
+    }
     if (pathname === '/api/auth/register' || pathname === '/api/auth/login') {
       if (req.method !== 'POST') return send(res, 405, { error: 'POST' }), true;
       if (limited(req, 30)) return send(res, 429, { error: 'Слишком много попыток. Подождите 10 минут.' }), true;
@@ -183,6 +206,22 @@ async function handle(req, res, pathname) {
       await db('DEL', 'sess:' + token);
       return send(res, 200, { ok: true }), true;
     }
+    if (pathname === '/api/me/avatar' && req.method === 'POST') { // загрузить или убрать своё фото
+      const b = await readBody(req, AVA_MAX * 1.4 + 1024);
+      const data = String(b.data || '').replace(/^data:image\/[a-z]+;base64,/, '');
+      if (!data) {
+        await dbMany([['DEL', 'ava:' + L], ['HDEL', 'user:' + L, 'avatar']]);
+        const nu = { ...user, ava: null }; refresh(L, nu);
+        return send(res, 200, { user: nu }), true;
+      }
+      const buf = Buffer.from(data, 'base64');
+      if (!buf.length || buf.length > AVA_MAX || !imageKind(buf)) return send(res, 400, { error: 'Нужна картинка JPG, PNG или WebP' }), true;
+      const ver = String(Date.now());
+      await dbMany([['SET', 'ava:' + L, buf.toString('base64')], ['HSET', 'user:' + L, 'avatar', ver]]);
+      const nu = publicUser(L, await getUser(L));
+      refresh(L, nu);
+      return send(res, 200, { user: nu }), true;
+    }
     if (pathname === '/api/me' && req.method === 'GET') {
       return send(res, 200, { user, ...(await me(L)) }), true;
     }
@@ -192,7 +231,9 @@ async function handle(req, res, pathname) {
       const emoji = AVATARS.includes(b.emoji) ? b.emoji : '';
       const color = /^#[0-9a-f]{6}$/i.test(b.color || '') ? b.color : '';
       await db('HSET', 'user:' + L, 'name', name, 'emoji', emoji, 'color', color);
-      return send(res, 200, { user: publicUser(L, { name, emoji, color }) }), true;
+      const nu = publicUser(L, { name, emoji, color, avatar: (await db('HGET', 'user:' + L, 'avatar')) || '' });
+      refresh(L, nu);
+      return send(res, 200, { user: nu }), true;
     }
 
     if (req.method !== 'POST') return send(res, 405, { error: 'POST' }), true;
