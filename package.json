@@ -1,0 +1,14 @@
+{
+  "name": "obshchiy-divan",
+  "version": "1.0.0",
+  "description": "Совместный просмотр видео: у каждого свой файл, синхронизируются пауза, перемотка, чат и реакции",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {},
+  "license": "MIT"
+}
