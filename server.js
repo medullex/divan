@@ -119,10 +119,13 @@ async function apiRutubeInfo(id, res) {
  *            state: {playing,pos,at}, chat[], emptySince } */
 const rooms = new Map();
 const COLORS = ['#f5a742', '#d9707f', '#7cc59a', '#8fb3e8', '#c9a0e8', '#e8d27c', '#6fd0c8', '#f08a5d'];
+const AVATARS = ['🐱', '🐶', '🦊', '🐼', '🐸', '🐵', '🦁', '🐯', '🐨', '🐰', '🦄', '🐙', '👽', '🤖', '👻', '💀', '🎃', '🍕', '🍿', '🎬', '⭐', '🔥', '🌚', '😎'];
+const QUEUE_MAX = 50;
+const hashPass = (salt, pass) => crypto.createHash('sha256').update(salt + '\u0000' + pass).digest();
 
 function getRoom(code) {
   let r = rooms.get(code);
-  if (!r) { r = { people: new Map(), hostId: null, live: null, media: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
+  if (!r) { r = { people: new Map(), hostId: null, live: null, media: null, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
   return r;
 }
 // Текущая позиция плеера по часам сервера — одинаковая для всех, кто подключится
@@ -130,8 +133,32 @@ function liveState(r) {
   const s = r.state;
   return { playing: s.playing, pos: s.playing ? s.pos + (Date.now() - s.at) / 1000 : s.pos };
 }
-const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color }));
-const roomInfo = r => ({ t: 'room', hostId: r.hostId, live: r.live, media: r.media, state: liveState(r), peers: peersList(r) });
+const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji }));
+const roomInfo = r => ({ t: 'room', hostId: r.hostId, live: r.live, media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
+
+// Видео с Rutube / VK Видео из сообщения клиента -> проверенный объект (или null)
+function makeMedia(m) {
+  let media = null;
+  if (m.kind === 'rutube' && /^[0-9a-f]{32}$/.test(String(m.id))) {
+    media = { kind: 'rutube', id: String(m.id) };
+  } else if (m.kind === 'vk' && /^-?\d{1,20}$/.test(String(m.oid)) && /^\d{1,20}$/.test(String(m.vid))) {
+    media = { kind: 'vk', oid: String(m.oid), vid: String(m.vid) };
+    if (/^[0-9a-f]{4,40}$/i.test(String(m.hash || ''))) media.hash = String(m.hash);
+  }
+  if (media) {
+    media.title = clean(m.title, 200) || 'Видео';
+    const d = Number(m.dur); media.dur = Number.isFinite(d) && d > 0 ? Math.round(d) : 0;
+    if (typeof m.thumb === 'string' && /^https:\/\/[\w.-]+\/[\w\/.\-]+$/.test(m.thumb) && m.thumb.length < 300) media.thumb = m.thumb;
+  }
+  return media;
+}
+function playMedia(room, media, now) {
+  if (media) { media = { ...media, n: now }; delete media.qid; delete media.by; delete media.byName; }
+  room.media = media;
+  if (media) room.live = null;
+  room.state = { playing: false, pos: 0, at: now };
+  broadcast(room, roomInfo(room));
+}
 
 function send(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 function broadcast(r, msg, exceptId) {
@@ -144,7 +171,7 @@ const validCode = c => typeof c === 'string' && /^[a-z0-9-]{3,32}$/.test(c);
 
 // ---------- websocket ----------
 const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => {
-  let room = null, id = null;
+  let room = null, id = null, passTries = 0;
   // антиспам: запас 80 сообщений, пополняется ~20 в секунду (WebRTC шлёт пачки служебных сообщений)
   let tokens = 80, last = Date.now();
 
@@ -163,11 +190,22 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       if (room || !validCode(m.room)) return send(ws, { t: 'error', text: 'Неверный код комнаты' });
       const r = getRoom(m.room);
       if (r.people.size >= MAX_PEOPLE) return send(ws, { t: 'error', text: 'Комната заполнена' });
+      const pass = clean(m.pass, 64);
+      if (r.pass) { // комната с паролем
+        if (++passTries > 10) return send(ws, { t: 'error', text: 'Слишком много попыток. Обновите страницу.' });
+        const ok = pass && crypto.timingSafeEqual(hashPass(r.pass.salt, pass), r.pass.hash);
+        if (!ok) return send(ws, { t: 'needpass', wrong: !!pass });
+      } else if (r.people.size === 0 && !r.hostId && pass) { // создатель комнаты задал пароль
+        const salt = crypto.randomBytes(8).toString('hex');
+        r.pass = { salt, hash: hashPass(salt, pass) };
+      }
       room = r; r.emptySince = null;
       id = crypto.randomBytes(6).toString('hex');
       const used = new Set([...r.people.values()].map(p => p.color));
-      const color = COLORS.find(c => !used.has(c)) || COLORS[r.people.size % COLORS.length];
-      r.people.set(id, { ws, name: clean(m.name, 24) || 'Гость', color });
+      const color = /^#[0-9a-f]{6}$/i.test(String(m.color || '')) ? String(m.color).toLowerCase()
+        : (COLORS.find(c => !used.has(c)) || COLORS[r.people.size % COLORS.length]);
+      const emoji = AVATARS.includes(m.emoji) ? m.emoji : null;
+      r.people.set(id, { ws, name: clean(m.name, 24) || 'Гость', color, emoji });
       if (!r.hostId) r.hostId = id; // первый вошедший — ведущий
       send(ws, { ...roomInfo(r), t: 'welcome', id, chat: r.chat });
       broadcast(r, roomInfo(r), id);
@@ -193,17 +231,50 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       }
       case 'media': { // ведущий выбрал видео с Rutube или VK Видео (или убрал его)
         if (!isHost) return;
-        let media = null;
-        if (m.kind === 'rutube' && /^[0-9a-f]{32}$/.test(String(m.id))) {
-          media = { kind: 'rutube', id: String(m.id) };
-        } else if (m.kind === 'vk' && /^-?\d{1,20}$/.test(String(m.oid)) && /^\d{1,20}$/.test(String(m.vid))) {
-          media = { kind: 'vk', oid: String(m.oid), vid: String(m.vid) };
-          if (/^[0-9a-f]{4,40}$/i.test(String(m.hash || ''))) media.hash = String(m.hash);
-        }
-        if (media) { media.title = clean(m.title, 200) || 'Видео'; media.dur = Number(m.dur) || 0; media.n = Date.now(); }
-        room.media = media;
-        if (media) room.live = null;
-        room.state = { playing: false, pos: 0, at: now };
+        playMedia(room, makeMedia(m), now);
+        break;
+      }
+      case 'qadd': { // любой участник добавляет видео в очередь
+        const media = makeMedia(m);
+        if (!media) return;
+        if (room.queue.length >= QUEUE_MAX) return send(ws, { t: 'error', text: 'Очередь заполнена' });
+        room.queue.push({ ...media, qid: crypto.randomBytes(4).toString('hex'), by: id, byName: me.name });
+        broadcast(room, roomInfo(room));
+        break;
+      }
+      case 'qdel': { // убрать из очереди: ведущий — любое, участник — своё
+        const i = room.queue.findIndex(q => q.qid === String(m.qid));
+        if (i < 0 || !(isHost || room.queue[i].by === id)) return;
+        room.queue.splice(i, 1);
+        broadcast(room, roomInfo(room));
+        break;
+      }
+      case 'qmove': { // ведущий меняет порядок: поднять на одну позицию вверх
+        if (!isHost) return;
+        const i = room.queue.findIndex(q => q.qid === String(m.qid));
+        if (i <= 0) return;
+        [room.queue[i - 1], room.queue[i]] = [room.queue[i], room.queue[i - 1]];
+        broadcast(room, roomInfo(room));
+        break;
+      }
+      case 'qplay': { // ведущий включает видео из очереди сейчас
+        if (!isHost) return;
+        const i = room.queue.findIndex(q => q.qid === String(m.qid));
+        if (i < 0) return;
+        const [item] = room.queue.splice(i, 1);
+        playMedia(room, item, now);
+        break;
+      }
+      case 'next': { // ведущий: следующее видео из очереди (вручную или по окончании)
+        if (!isHost || !room.queue.length) return;
+        playMedia(room, room.queue.shift(), now);
+        break;
+      }
+      case 'setpass': { // ведущий ставит, меняет или снимает пароль
+        if (!isHost) return;
+        const pass = clean(m.pass, 64);
+        if (pass) { const salt = crypto.randomBytes(8).toString('hex'); room.pass = { salt, hash: hashPass(salt, pass) }; }
+        else room.pass = null;
         broadcast(room, roomInfo(room));
         break;
       }
@@ -230,7 +301,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       case 'chat': {
         const text = clean(m.text, 400);
         if (!text) return;
-        const msg = { t: 'chat', id: crypto.randomBytes(4).toString('hex'), by: id, name: me.name, color: me.color, text, ts: now };
+        const msg = { t: 'chat', id: crypto.randomBytes(4).toString('hex'), by: id, name: me.name, color: me.color, emoji: me.emoji, text, ts: now };
         room.chat.push(msg);
         if (room.chat.length > CHAT_KEEP) room.chat.splice(0, room.chat.length - CHAT_KEEP);
         broadcast(room, msg);
