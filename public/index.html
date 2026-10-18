@@ -547,7 +547,9 @@ function makePc(id, g){
   pc.onicecandidate = e => { if (e.candidate) sig(id, { cand: e.candidate, gen: g }); };
   pc.onconnectionstatechange = () => {
     pcState[id] = pc.connectionState; renderPeople();
-    if (!amHost() && pc.connectionState === 'failed') showRetry();
+    if (amHost()) return;
+    if (pc.connectionState === 'connected'){ clearTimeout(waitTimer); $('#empty').hidden = true; $('#retryBtn').hidden = true; }
+    else if (pc.connectionState === 'failed') showRetry();
   };
   pcs.set(id, pc); pcState[id] = 'new';
   return pc;
@@ -603,7 +605,12 @@ function attachRemote(s){
   clearTimeout(waitTimer);
   if (v.srcObject !== s){ v.removeAttribute('src'); v.srcObject = s; }
   v.controls = true; v.muted = false;
-  $('#empty').hidden = true; $('#retryBtn').hidden = true;
+  const pc = pcs.get(hostId);
+  if (pc && pc.connectionState === 'connected'){ $('#empty').hidden = true; $('#retryBtn').hidden = true; }
+  else { // дорожка пришла, но соединение ещё устанавливается — не показываем пустой плеер с 00:00
+    $('#empty').hidden = false; $('#emptyTitle').textContent = 'Подключаемся к видео…'; $('#emptyText').textContent = ''; $('#retryBtn').hidden = true;
+    armWaitTimer();
+  }
   v.play().then(() => { $('#soundbar').hidden = true; }).catch(() => {
     v.muted = true; v.play().catch(()=>{}); $('#soundbar').hidden = false;   // браузер не дал включить звук сам
   });
@@ -615,12 +622,15 @@ function clearRemote(){
 $('#soundBtn').addEventListener('click', () => { v.muted = false; v.play().catch(()=>{}); $('#soundbar').hidden = true; });
 function armWaitTimer(){
   clearTimeout(waitTimer);
-  waitTimer = setTimeout(() => { if (!amHost() && live && !v.srcObject) showRetry(); }, 15000);
+  waitTimer = setTimeout(() => {
+    const pc = pcs.get(hostId);
+    if (!amHost() && live && !(pc && pc.connectionState === 'connected')) showRetry();
+  }, 15000);
 }
 function showRetry(){
   $('#empty').hidden = false;
   $('#emptyTitle').textContent = 'Не получается подключиться к видео';
-  $('#emptyText').textContent = 'Нажмите «Переподключиться». Если не поможет, попробуйте другой интернет (например, мобильный вместо Wi‑Fi) или включите/выключите VPN.';
+  $('#emptyText').textContent = 'Похоже, ваша сеть не пускает прямое подключение к ведущему (так бывает с мобильным интернетом). Нажмите «Переподключиться» или подключитесь к Wi‑Fi. Видео с Rutube и VK работают в любой сети.';
   $('#retryBtn').hidden = false;
 }
 $('#retryBtn').addEventListener('click', () => {
