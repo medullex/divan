@@ -468,6 +468,7 @@ fetch('/config').then(r => r.json()).then(c => { if (c.iceServers) iceServers = 
 
 function startRoom(code, name){
   roomCode = code; myName = name; hit(code);
+  try { relayMode = sessionStorage.getItem('divan-relay-' + code) === '1'; } catch {}
   $('#inviteLink').textContent = location.origin + '/r/' + code;
   connect();
 }
@@ -478,9 +479,13 @@ function connect(){
   ws.onopen = () => { retry = 0;
     const tk = store.get('divan-token'); if (tk) ws.send(JSON.stringify({ t:'auth', token:tk }));
     ws.send(JSON.stringify({ t:'hello', vid:VID, room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
-  ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
+  ws.binaryType = 'arraybuffer';
+  ws.onmessage = e => {
+    if (typeof e.data !== 'string') { relayData(e.data); return; } // кусочек видео «через сервер»
+    let m; try { m = JSON.parse(e.data); } catch { return; } handle(m);
+  };
   ws.onclose = () => {
-    closeAll(); myId = null;
+    closeAll(); myId = null; stopRelay();
     if (replaced){ setConn(false, 'комната открыта в другой вкладке'); return; } // не спорим с новой вкладкой
     setConn(false, 'нет связи, переподключаюсь…');
     setTimeout(connect, Math.min(10000, 800 * 2 ** retry++));
@@ -501,6 +506,7 @@ function handle(m){
     case 'welcome':
       $('#gate').hidden = true; $('#hallMain').hidden = false;
       myId = m.id; chat = m.chat || []; renderChat();
+      if (relayMode) out({ t:'relay', on:true });
       setConn(true, 'комната ' + roomCode);
       onRoom(m);
       break;
@@ -513,6 +519,8 @@ function handle(m){
     case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); break;
     case 'react': floatEmoji(m.e); break;
     case 'error': if (myId) toast(m.text, 4000); else setConn(false, m.text); break;
+    case 'relaystart': relayStartView(m.mime); break;
+    case 'relayrestart': if (amHost()) startRelay(); break;
     case 'replaced':
       replaced = true;
       $('#empty').hidden = false; $('#emptyTitle').textContent = 'Комната открыта в другой вкладке';
@@ -536,12 +544,15 @@ function onRoom(m){
   }
   if (amHost()){
     // раздаём видео всем, у кого ещё нет соединения; закрываем ушедших
-    const ids = new Set(peers.map(p => p.id));
-    for (const id of [...pcs.keys()]) if (!ids.has(id)) closePc(id);
-    if (stream) for (const p of peers) if (p.id !== myId && !pcs.has(p.id)) startPeer(p.id);
+    const ids = new Set(peers.filter(p => !p.relay).map(p => p.id));
+    for (const id of [...pcs.keys()]) if (!ids.has(id)) closePc(id);   // ушедшие и смотрящие «через сервер»
+    if (stream) for (const p of peers) if (p.id !== myId && !p.relay && !pcs.has(p.id)) startPeer(p.id);
+    const relayN = peers.filter(p => p.relay).length;
+    if (relayN && !rec && stream) startRelay();
+    if (!relayN && rec) stopRelay();
   } else {
-    if (!live) { closeAll(); clearRemote(); }
-    else armWaitTimer();
+    if (!live) { closeAll(); clearRemote(); teardownMSE(); }
+    else if (!relayMode) armWaitTimer();
   }
   handleMedia(m.media || null, m.state);
   renderRole(); renderPeople(); renderQueue(); renderLock();
@@ -556,7 +567,7 @@ function makePc(id, g){
     pcState[id] = pc.connectionState; renderPeople();
     if (amHost()) return;
     if (pc.connectionState === 'connected'){ clearTimeout(waitTimer); $('#empty').hidden = true; $('#retryBtn').hidden = true; }
-    else if (pc.connectionState === 'failed') showRetry();
+    else if (pc.connectionState === 'failed') switchToRelay();
   };
   pcs.set(id, pc); pcState[id] = 'new';
   return pc;
@@ -585,7 +596,7 @@ async function onSignal(from, d){
   if (!d) return;
   if (d.want && amHost()) { startPeer(from); return; }        // зритель просит переподключить
   if (d.sdp && d.sdp.type === 'offer'){                         // зритель получил предложение от ведущего
-    if (from !== hostId) return;
+    if (from !== hostId || relayMode) return; // смотрим «через сервер» — прямое подключение не нужно
     closePc(from);
     const pc = makePc(from, d.gen);
     pc.ontrack = e => {
@@ -631,7 +642,7 @@ function armWaitTimer(){
   clearTimeout(waitTimer);
   waitTimer = setTimeout(() => {
     const pc = pcs.get(hostId);
-    if (!amHost() && live && !(pc && pc.connectionState === 'connected')) showRetry();
+    if (!amHost() && live && !relayMode && !(pc && pc.connectionState === 'connected')) switchToRelay();
   }, 15000);
 }
 function showRetry(){
@@ -644,6 +655,100 @@ $('#retryBtn').addEventListener('click', () => {
   $('#retryBtn').hidden = true; $('#emptyTitle').textContent = 'Подключаемся к видео…'; $('#emptyText').textContent = '';
   if (hostId) sig(hostId, { want: true }); armWaitTimer();
 });
+
+
+/* ---------- видео «через сервер» ----------
+   Если сеть зрителя не пускает прямое подключение к ведущему (мобильный интернет, строгий Wi‑Fi),
+   ведущий записывает своё видео кусочками по полсекунды, сервер пересылает их зрителю,
+   а тот собирает их в плеере (MediaSource). Задержка — пара секунд, зато работает в любой сети. */
+let relayMode = false, rec = null, relayChain = Promise.resolve();
+let ms = null, sb = null, mq = [], mseOn = false, msUrl = null;
+function switchToRelay(){
+  if (relayMode || amHost()) return;
+  relayMode = true;
+  try { sessionStorage.setItem('divan-relay-' + roomCode, '1'); } catch {}
+  clearTimeout(waitTimer); closeAll(); clearRemote();
+  $('#empty').hidden = false; $('#retryBtn').hidden = true;
+  $('#emptyTitle').textContent = 'Подключаемся через сервер…';
+  $('#emptyText').textContent = 'Прямое подключение к ведущему не получилось (так бывает с мобильным интернетом). Видео пойдёт через наш сервер, с задержкой в пару секунд.';
+  out({ t:'relay', on:true });
+}
+function pickMime(){
+  // H.264 в MP4 понимают все, включая iPhone; остальное — запасные варианты
+  const list = ['video/mp4;codecs="avc1.42E01E,mp4a.40.2"', 'video/mp4;codecs="avc1.4D401F,mp4a.40.2"', 'video/mp4;codecs="avc1.640028,mp4a.40.2"',
+    'video/mp4;codecs="avc1.42E01E,opus"', 'video/mp4;codecs=avc1', 'video/mp4',
+    'video/webm;codecs="vp8,opus"', 'video/webm'];
+  return list.find(t => { try { return MediaRecorder.isTypeSupported(t); } catch { return false; } }) || '';
+}
+function startRelay(){ // ведущий
+  if (!amHost() || !stream || !stream.getVideoTracks().length || typeof MediaRecorder === 'undefined') return;
+  stopRelay();
+  const mime = pickMime();
+  let r;
+  // ключевой кадр каждую секунду: тогда кусочки идут равномерно и новый зритель быстро видит картинку
+  try { r = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 1500000, audioBitsPerSecond: 96000, videoKeyFrameIntervalDuration: 1000 }); }
+  catch (e) { console.warn('recorder', e); return; }
+  rec = r;
+  r.onstart = () => { if (rec === r) out({ t:'relaystart', mime: r.mimeType || mime }); }; // точный формат известен после старта
+  r.ondataavailable = e => {
+    if (rec !== r || !e.data || !e.data.size) return;
+    const blob = e.data;
+    relayChain = relayChain.then(() => blob.arrayBuffer()).then(b => { if (rec === r && ws && ws.readyState === 1) ws.send(b); }).catch(() => {});
+  };
+  r.start(500);
+  renderPeople();
+}
+function stopRelay(){ if (rec){ const r = rec; rec = null; try { r.stop(); } catch {} } }
+function teardownMSE(){
+  if (!mseOn && !ms) return;
+  mseOn = false; mq = []; sb = null;
+  if (ms){ try { if (ms.readyState === 'open') ms.endOfStream(); } catch {} }
+  ms = null;
+  try { if (!(v.srcObject instanceof MediaStream)) v.srcObject = null; } catch {}
+  if (msUrl){ v.removeAttribute('src'); URL.revokeObjectURL(msUrl); msUrl = null; v.load(); }
+}
+function relayStartView(mime){ // зритель
+  if (!relayMode || amHost()) return;
+  teardownMSE();
+  const MS = window.ManagedMediaSource || window.MediaSource;
+  // браузер ведущего пишет короткие названия кодеков (vp9, avc1) — пробуем и полные варианты
+  const variants = [mime, mime.replace(/\bvp9\b/, 'vp09.00.10.08'), mime.replace(/\bavc1\b(?![.])/, 'avc1.42E01E')];
+  const pick = MS ? variants.find(t => { try { return MS.isTypeSupported(t); } catch { return false; } }) : null;
+  const ok = !!pick; if (ok) mime = pick;
+  if (!ok){
+    $('#empty').hidden = false; $('#retryBtn').hidden = true;
+    $('#emptyTitle').textContent = 'Этот браузер не может показать видео через сервер';
+    $('#emptyText').textContent = 'Подключитесь к Wi‑Fi или откройте сайт в Chrome / новом Safari. Видео с Rutube и VK работают везде.';
+    return;
+  }
+  ms = new MS(); mseOn = true; mq = [];
+  if (window.ManagedMediaSource && ms instanceof window.ManagedMediaSource) v.disableRemotePlayback = true;
+  let attached = false;
+  try { v.srcObject = ms; attached = true; } catch {}
+  if (!attached){ msUrl = URL.createObjectURL(ms); v.src = msUrl; }
+  const my = ms;
+  ms.addEventListener('sourceopen', () => {
+    if (ms !== my) return;
+    try { sb = ms.addSourceBuffer(mime); sb.mode = 'sequence'; sb.addEventListener('updateend', pump); pump(); }
+    catch (e) { console.warn('sourcebuffer', e); }
+  }, { once: true });
+  v.controls = true; $('#empty').hidden = true; $('#retryBtn').hidden = true;
+  v.play().then(() => { $('#soundbar').hidden = true; }).catch(() => { v.muted = true; v.play().catch(() => {}); $('#soundbar').hidden = false; });
+}
+function relayData(buf){ if (!mseOn) return; mq.push(buf); pump(); }
+function pump(){
+  if (!sb || sb.updating || !mq.length || !ms || ms.readyState !== 'open') return;
+  try {
+    const b = sb.buffered;
+    if (b.length){
+      const end = b.end(b.length - 1);
+      if (end - v.currentTime > 5) v.currentTime = end - 1;            // отстали — прыгаем к «живому» краю
+      if (v.currentTime - b.start(0) > 40){ sb.remove(b.start(0), v.currentTime - 15); return; } // чистим старое
+    }
+    sb.appendBuffer(mq.shift());
+    if (v.paused && !v.ended) v.play().catch(() => {});
+  } catch (e) { console.warn('append', e); }
+}
 
 /* ---------- ведущий ---------- */
 $('#pick').addEventListener('change', e => {
@@ -668,9 +773,14 @@ function ensureStream(){
 }
 function scheduleRestart(){
   clearTimeout(restartTimer);
-  restartTimer = setTimeout(() => { if (amHost()) for (const p of peers) if (p.id !== myId) startPeer(p.id); }, 400);
+  restartTimer = setTimeout(() => {
+    if (!amHost()) return;
+    for (const p of peers) if (p.id !== myId && !p.relay) startPeer(p.id);
+    if (peers.some(p => p.relay)) startRelay();
+  }, 400);
 }
 function stopHosting(){
+  stopRelay();
   if (v.src && v.src.startsWith('blob:')) { v.pause(); URL.revokeObjectURL(v.src); }
   v.removeAttribute('src'); v.load();
   stream = null; fileName = ''; $('#fname').textContent = '';
@@ -1003,7 +1113,7 @@ function renderRole(){
     $('#roleNote').textContent = hostId ? 'Ведущий — ' + nameOf(hostId) + '. Видео, пауза и перемотка у вас меняются вместе с ним.'
       : 'Ведущий переподключается… Если он не вернётся за 20 секунд, управление перейдёт другому.';
     $('#emptyPick').hidden = true; $('#fname').textContent = live ? live.title : '';
-    if (!v.srcObject){
+    if (!v.srcObject && !mseOn){
       $('#empty').hidden = false;
       if (!live){ $('#emptyTitle').textContent = 'Ждём, когда ' + nameOf(hostId) + ' включит видео'; $('#emptyText').textContent = 'Как только ведущий выберет файл, он появится здесь.'; $('#retryBtn').hidden = true; }
       else if ($('#retryBtn').hidden){ $('#emptyTitle').textContent = 'Подключаемся к видео…'; $('#emptyText').textContent = live.title; }
@@ -1024,6 +1134,7 @@ function renderPeople(){
     else if (amHost()){
       const st = pcState[p.id];
       if (!stream) c.textContent = 'ждёт';
+      else if (p.relay){ c.textContent = rec ? 'через сервер' : 'ждёт сервер'; c.classList.add('ok'); }
       else if (st === 'connected'){ c.textContent = 'смотрит'; c.classList.add('ok'); }
       else if (st === 'failed' || st === 'disconnected'){ c.textContent = 'нет связи'; c.classList.add('warn'); }
       else c.textContent = 'подключается';
