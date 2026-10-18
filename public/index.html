@@ -183,6 +183,10 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 .invite-pop{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;background:var(--seat);border:1px solid var(--lamp);border-radius:10px;
   padding:12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 10px 40px rgba(0,0,0,.5);width:min(440px,calc(100% - 32px))}
 .invite-pop p{margin:0;flex:1 1 180px;font-size:14px}
+.ava.img{background-size:cover;background-position:center;color:transparent}
+.msg .ava{width:18px;height:18px;display:inline-grid;vertical-align:-4px;margin-right:5px;font-size:10px}
+.photorow{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.photorow label.btn{cursor:pointer}
 </style>
 </head>
 <body>
@@ -228,6 +232,12 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
     <div class="field">
       <label>Аватарка и цвет</label>
       <div class="mepreview"><span class="ava" id="mePrev"></span><span>Так вас увидят в комнате</span></div>
+      <div class="photorow" id="photoRow" hidden>
+        <label class="btn ghost small" for="photoIn" tabindex="0">📷 Загрузить своё фото</label>
+        <button class="btn ghost small" type="button" id="photoOff" hidden>Убрать фото</button>
+        <input type="file" id="photoIn" accept="image/*" hidden>
+      </div>
+      <p class="hint" id="photoHint" hidden>Своё фото вместо эмодзи можно поставить после входа в аккаунт.</p>
       <div class="avpick" id="avPick"></div>
       <div class="colpick" id="colPick"></div>
     </div>
@@ -379,13 +389,17 @@ const AVATARS = ['🐱','🐶','🦊','🐼','🐸','🐵','🦁','🐯','🐨',
 const PALETTE = ['#f5a742','#d9707f','#7cc59a','#8fb3e8','#c9a0e8','#e8d27c','#6fd0c8','#f08a5d','#e86a6a','#9ad66b'];
 let myEmoji = store.get('divan-emoji'); if (!AVATARS.includes(myEmoji)) myEmoji = AVATARS[Math.floor(Math.random()*AVATARS.length)];
 let myColor = store.get('divan-color'); if (!PALETTE.includes(myColor)) myColor = PALETTE[Math.floor(Math.random()*PALETTE.length)];
-function paintAva(el, emoji, color, name){
-  el.style.background = color || 'var(--muted)';
-  el.textContent = emoji || (name || '?').slice(0,1).toUpperCase();
-  el.classList.toggle('emo', !!emoji);
+var myAva = null; // ссылка на своё фото (если загружено в аккаунт)
+function paintAva(el, emoji, color, name, ava){
+  const photo = typeof ava === 'string' && ava.startsWith('/api/avatar/');
+  el.style.backgroundColor = color || 'var(--muted)';
+  el.style.backgroundImage = photo ? 'url("' + ava + '")' : '';
+  el.textContent = photo ? '' : (emoji || (name || '?').slice(0,1).toUpperCase());
+  el.classList.toggle('emo', !photo && !!emoji);
+  el.classList.toggle('img', photo);
 }
 function renderMe(){
-  paintAva($('#mePrev'), myEmoji, myColor);
+  paintAva($('#mePrev'), myEmoji, myColor, '', myAva);
   for (const b of $('#avPick').children) b.setAttribute('aria-pressed', b.dataset.v === myEmoji);
   for (const b of $('#colPick').children) b.setAttribute('aria-pressed', b.dataset.v === myColor);
 }
@@ -975,7 +989,7 @@ function renderPeople(){
   for (const p of peers){
     const li = document.createElement('li');
     const a = document.createElement('span'); a.className = 'ava';
-    paintAva(a, p.emoji, p.color, p.name);
+    paintAva(a, p.emoji, p.color, p.name, p.ava);
     const n = document.createElement('span'); n.className = 'pname';
     n.textContent = p.id === myId ? p.name + ' (вы)' : p.name;
     const c = document.createElement('span'); c.className = 'chip';
@@ -1033,7 +1047,10 @@ function renderChat(){
   if (!chat.length){ const p = document.createElement('p'); p.className='hint'; p.textContent='Сообщений пока нет. Напишите первое.'; box.append(p); return; }
   for (const m of chat){
     const d = document.createElement('div'); d.className = 'msg';
-    const b = document.createElement('b'); b.textContent = (m.emoji ? m.emoji + ' ' : '') + (m.by === myId ? 'Вы' : m.name); b.style.color = m.color;
+    const b = document.createElement('b'); b.style.color = m.color;
+    if (m.ava){ const a = document.createElement('span'); a.className = 'ava'; paintAva(a, m.emoji, m.color, m.name, m.ava); b.append(a); }
+    else if (m.emoji) b.append(m.emoji + ' ');
+    b.append(m.by === myId ? 'Вы' : m.name);
     const t = document.createElement('span'); t.textContent = m.text;
     d.append(b, t); box.append(d);
   }
@@ -1156,15 +1173,20 @@ $('#addFriendForm').addEventListener('submit', async e => {
 });
 
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
-const avaOf = u => { const a = el('span', 'ava'); paintAva(a, u.emoji, u.color, u.name); return a; };
+const avaOf = u => { const a = el('span', 'ava'); paintAva(a, u.emoji, u.color, u.name, u.ava); return a; };
 const btn = (text, cls, fn) => { const b = el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
 function statusText(f){ return !f.online ? 'не в сети' : f.room ? (f.room === roomCode ? 'здесь' : 'в комнате' + (f.locked ? ' 🔒' : '')) : 'в сети'; }
 
 function renderAcct(){
+  myAva = myUser ? myUser.ava || null : null;
+  renderMe();
+  $('#photoRow').hidden = !accountsOn || !myUser;
+  $('#photoHint').hidden = !accountsOn || !!myUser;
+  $('#photoOff').hidden = !myAva;
   $('#acct').hidden = !accountsOn;
   $('#acctOut').hidden = !!myUser; $('#acctIn').hidden = !myUser;
   if (!myUser) return;
-  paintAva($('#acctAva'), myUser.emoji, myUser.color, myUser.name);
+  paintAva($('#acctAva'), myUser.emoji, myUser.color, myUser.name, myUser.ava);
   $('#acctName').textContent = myUser.name; $('#acctLogin').textContent = '@' + myUser.login;
   const rl = $('#reqList'); rl.replaceChildren();
   for (const r of requests){
@@ -1239,7 +1261,7 @@ function acctHandle(m){
     case 'invited': {
       if (m.room === roomCode && myId) break;
       invRoom = m.room;
-      paintAva($('#invAva'), m.from.emoji, m.from.color, m.from.name);
+      paintAva($('#invAva'), m.from.emoji, m.from.color, m.from.name, m.from.ava);
       $('#invText').textContent = m.from.name + ' зовёт вас в комнату' + (m.locked ? ' (с паролем — спросите его)' : '');
       $('#invitePop').hidden = false;
       clearTimeout(invTimer); invTimer = setTimeout(() => { $('#invitePop').hidden = true; }, 60000);
@@ -1267,6 +1289,37 @@ fetch('/config').then(r => r.json()).then(c => {
   renderAcct();
   if (accountsOn && token()) { loadMe(); openPresence(); }
 }).catch(() => {});
+
+/* ---------- своё фото ---------- */
+function loadImage(file){
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); res(img); };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('Не удалось открыть картинку. Попробуйте JPG или PNG.')); };
+    img.src = url;
+  });
+}
+$('#photoIn').addEventListener('change', async e => {
+  const f = e.target.files && e.target.files[0]; e.target.value = '';
+  if (!f || !myUser) return;
+  const hint = $('#photoHint');
+  if (f.size > 25e6){ hint.hidden = false; hint.textContent = 'Файл слишком большой.'; return; }
+  try {
+    const img = await loadImage(f);
+    // квадрат из центра, 192×192, JPEG — весит 10–20 КБ
+    const S = 192, side = Math.min(img.naturalWidth, img.naturalHeight);
+    const c = document.createElement('canvas'); c.width = c.height = S;
+    const ctx = c.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, S, S);
+    ctx.drawImage(img, (img.naturalWidth - side) / 2, (img.naturalHeight - side) / 2, side, side, 0, 0, S, S);
+    let q = 0.85, data = c.toDataURL('image/jpeg', q);
+    while (data.length > 70000 && q > 0.4){ q -= 0.15; data = c.toDataURL('image/jpeg', q); }
+    const j = await api('/api/me/avatar', { data });
+    myUser = j.user; renderAcct(); hint.hidden = true;
+  } catch (err) { hint.hidden = false; hint.textContent = err.message || 'Не получилось загрузить фото.'; }
+});
+$('#photoOff').addEventListener('click', async () => {
+  try { const j = await api('/api/me/avatar', { data: '' }); myUser = j.user; renderAcct(); } catch {}
+});
 
 /* ---------- вход по ссылке на комнату (в самом конце, когда всё объявлено) ---------- */
 const preset = roomFromUrl();
