@@ -45,7 +45,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     return res.end(JSON.stringify({ iceServers: ICE, accounts: accounts.enabled }));
   }
-  if (/^\/api\/(auth|me|friends)(\/|$)/.test(url.pathname)) { accounts.handle(req, res, url.pathname); return; }
+  if (/^\/api\/(auth|me|friends|avatar)(\/|$)/.test(url.pathname)) { accounts.handle(req, res, url.pathname); return; }
   if (url.pathname === '/api/search') return apiSearch(url.searchParams.get('q'), res);
   if (url.pathname === '/api/rutube') return apiRutubeInfo(url.searchParams.get('id'), res);
   const file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
@@ -135,7 +135,7 @@ function liveState(r) {
   const s = r.state;
   return { playing: s.playing, pos: s.playing ? s.pos + (Date.now() - s.at) / 1000 : s.pos };
 }
-const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null }));
+const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null }));
 const roomInfo = r => ({ t: 'room', hostId: r.hostId, live: r.live, media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
 
 // Видео с Rutube / VK Видео из сообщения клиента -> проверенный объект (или null)
@@ -234,7 +234,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
         : (COLORS.find(c => !used.has(c)) || COLORS[r.people.size % COLORS.length]);
       const emoji = AVATARS.includes(m.emoji) ? m.emoji : null;
       const u = ws.user; // вошёл в аккаунт — показываем имя и аватарку из профиля
-      r.people.set(id, { ws, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null });
+      r.people.set(id, { ws, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null, ava: u ? u.ava : null });
       roomCode = m.room; ws.roomCode = m.room;
       if (u) accounts.notifyFriends(u.login);
       if (!r.hostId) r.hostId = id; // первый вошедший — ведущий
@@ -333,7 +333,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       case 'chat': {
         const text = clean(m.text, 400);
         if (!text) return;
-        const msg = { t: 'chat', id: crypto.randomBytes(4).toString('hex'), by: id, name: me.name, color: me.color, emoji: me.emoji, text, ts: now };
+        const msg = { t: 'chat', id: crypto.randomBytes(4).toString('hex'), by: id, name: me.name, color: me.color, emoji: me.emoji, ava: me.ava || null, text, ts: now };
         room.chat.push(msg);
         if (room.chat.length > CHAT_KEEP) room.chat.splice(0, room.chat.length - CHAT_KEEP);
         broadcast(room, msg);
