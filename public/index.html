@@ -6,7 +6,13 @@
 <meta name="theme-color" content="#141012">
 <title>Общий диван</title>
 <meta name="description" content="Смотрите фильмы вместе: поиск по Rutube, VK Видео по ссылке, общая пауза, чат и реакции.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='6' y='22' width='52' height='26' rx='8' fill='%23f5a742'/%3E%3Crect x='12' y='14' width='40' height='16' rx='6' fill='%23d9707f'/%3E%3Crect x='10' y='46' width='6' height='8' rx='2' fill='%23f5a742'/%3E%3Crect x='48' y='46' width='6' height='8' rx='2' fill='%23f5a742'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Диван">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
@@ -54,6 +60,10 @@ input[type=text]{min-width:0;background:var(--bg);color:var(--fg);border:1px sol
 .steps li{display:flex;gap:12px;color:var(--muted);font-size:14px}
 .steps b{font:700 13px var(--display);color:var(--lamp);flex:none;width:18px}
 .err{color:var(--rose);font-size:14px;min-height:1.5em}
+.install{display:flex;gap:12px;align-items:center;flex-wrap:wrap;background:var(--seat);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.install img{width:44px;height:44px;border-radius:10px;flex:none}
+.install p{margin:0;font-size:13px;color:var(--muted);flex:1 1 200px}
+.install b{color:var(--fg);font-weight:600}
 
 /* зал */
 main{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:14px;align-items:start}
@@ -146,6 +156,11 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
       </div>
     </div>
     <p class="err" id="lobbyErr" role="alert"></p>
+    <div class="install" id="installBox" hidden>
+      <img src="/icons/icon-192.png" alt="">
+      <p id="installText"><b>Общий диван как приложение.</b> Своя иконка на рабочем столе и отдельное окно.</p>
+      <button class="btn" id="installBtn" type="button" hidden>Установить</button>
+    </div>
     <ol class="steps">
       <li><b>1</b><span>Создайте комнату — вы станете ведущим.</span></li>
       <li><b>2</b><span>Скиньте друзьям ссылку на комнату.</span></li>
@@ -786,6 +801,30 @@ $('#chatform').addEventListener('submit', e => {
   const inp = $('#chatin'); const text = inp.value.trim(); if (!text) return;
   out({ t:'chat', text }); inp.value = '';
 });
+
+/* ---------- установка как приложение ---------- */
+const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+let installEvt = null;
+if (!standalone){
+  addEventListener('beforeinstallprompt', e => {
+    e.preventDefault(); installEvt = e;
+    $('#installBox').hidden = false; $('#installBtn').hidden = false;
+  });
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (ios){
+    $('#installBox').hidden = false;
+    $('#installText').innerHTML = '<b>Установить на iPhone:</b> откройте сайт в Safari, нажмите «Поделиться» внизу и выберите «На экран Домой».';
+  }
+}
+$('#installBtn').addEventListener('click', async () => {
+  if (!installEvt) return;
+  installEvt.prompt();
+  const r = await installEvt.userChoice.catch(() => null);
+  installEvt = null;
+  if (r && r.outcome === 'accepted') $('#installBox').hidden = true;
+});
+addEventListener('appinstalled', () => { $('#installBox').hidden = true; });
 
 /* ---------- вход по ссылке на комнату (в самом конце, когда всё объявлено) ---------- */
 const preset = roomFromUrl();
