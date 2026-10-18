@@ -381,6 +381,15 @@ const store = {
 const fmt = t => { t=Math.max(0,Math.floor(t||0)); const h=Math.floor(t/3600), m=Math.floor(t/60)%60, s=t%60;
   return (h ? h+':'+String(m).padStart(2,'0') : m)+':'+String(s).padStart(2,'0'); };
 const canHost = !!(HTMLMediaElement.prototype.captureStream || HTMLMediaElement.prototype.mozCaptureStream);
+// анонимная метка браузера — чтобы владелец сайта мог отличать посетителей (без имени и IP)
+let VID = store.get('divan-vid');
+if (!/^[a-f0-9]{16}$/.test(VID || '')){ VID = [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2,'0')).join(''); store.set('divan-vid', VID); }
+function hit(room){
+  const tk = store.get('divan-token');
+  fetch('/api/hit', { method:'POST', headers:{ 'Content-Type':'application/json', ...(tk ? { Authorization:'Bearer ' + tk } : {}) },
+    body: JSON.stringify({ vid: VID, name: store.get('divan-name') || '', room: room || '', app: matchMedia('(display-mode: standalone)').matches }) }).catch(() => {});
+}
+hit();
 
 /* ---------- лобби ---------- */
 const nameIn = $('#nameIn');
@@ -458,7 +467,7 @@ const amHost = () => myId && hostId === myId;
 fetch('/config').then(r => r.json()).then(c => { if (c.iceServers) iceServers = c.iceServers; }).catch(()=>{});
 
 function startRoom(code, name){
-  roomCode = code; myName = name;
+  roomCode = code; myName = name; hit(code);
   $('#inviteLink').textContent = location.origin + '/r/' + code;
   connect();
 }
@@ -468,7 +477,7 @@ function connect(){
   setConn(false, 'подключение…');
   ws.onopen = () => { retry = 0;
     const tk = store.get('divan-token'); if (tk) ws.send(JSON.stringify({ t:'auth', token:tk }));
-    ws.send(JSON.stringify({ t:'hello', room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
+    ws.send(JSON.stringify({ t:'hello', vid:VID, room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
   ws.onclose = () => {
     setConn(false, 'нет связи, переподключаюсь…');
@@ -941,7 +950,7 @@ $('#gateForm').addEventListener('submit', e => {
   e.preventDefault();
   const p = $('#gateIn').value.trim(); if (!p) return;
   myPass = p;
-  out({ t:'hello', room: roomCode, name: myName, emoji: myEmoji, color: myColor, pass: p });
+  out({ t:'hello', vid: VID, room: roomCode, name: myName, emoji: myEmoji, color: myColor, pass: p });
 });
 
 /* ---------- отрисовка ---------- */
@@ -1115,7 +1124,7 @@ $('#authForm').addEventListener('submit', async e => {
     const body = authMode === 'login' ? { login, pass } : { login, pass, name: nameIn.value.trim(), emoji: myEmoji, color: myColor };
     const j = await api(authMode === 'login' ? '/api/auth/login' : '/api/auth/register', body);
     store.set('divan-token', j.token); $('#authPass').value = '';
-    applyUser(j.user); await loadMe(); openPresence();
+    applyUser(j.user); await loadMe(); openPresence(); hit();
   } catch (err) { $('#authErr').textContent = err.message; }
   $('#authBtn').disabled = false;
 });
