@@ -163,6 +163,26 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 .passform{display:flex;gap:8px;flex-wrap:wrap;width:100%}
 .passform input{flex:1 1 180px}
 .embed iframe{width:100%;height:100%;border:0;display:block}
+/* аккаунт и друзья */
+.acct{background:var(--seat);border:1px solid var(--line);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.acct .err{min-height:0}
+.authform{display:flex;flex-direction:column;gap:8px}
+.acct-head{display:flex;align-items:center;gap:10px}
+.acct-head .ava{width:36px;height:36px;font-size:18px}
+.acct-head div{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.muted{color:var(--muted);font:500 12px var(--mono)}
+.flist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.flist:empty{display:none}
+.flist li{display:flex;align-items:center;gap:8px;font-size:14px;min-width:0;flex-wrap:wrap}
+.flist .who{flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fdot{width:8px;height:8px;border-radius:50%;background:var(--line);flex:none}
+.fdot.on{background:var(--ok)}
+.fdot.room{background:var(--lamp)}
+.flist .btn.small{flex:none}
+.room-friends{max-height:150px;overflow-y:auto}
+.invite-pop{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;background:var(--seat);border:1px solid var(--lamp);border-radius:10px;
+  padding:12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 10px 40px rgba(0,0,0,.5);width:min(440px,calc(100% - 32px))}
+.invite-pop p{margin:0;flex:1 1 180px;font-size:14px}
 </style>
 </head>
 <body>
@@ -173,6 +193,34 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
   <section class="lobby">
     <h2>Смотрите кино вместе, <span>где бы вы ни были</span></h2>
     <p>Создайте комнату и отправьте ссылку друзьям. Найдите фильм на Rutube или вставьте ссылку на VK Видео — он откроется у всех, с общей паузой и перемоткой.</p>
+    <div class="acct" id="acct" hidden>
+      <div id="acctOut">
+        <p><b style="color:var(--fg)">Аккаунт</b> — чтобы добавлять друзей, видеть, кто в сети, и звать их в комнату одной кнопкой. Можно и без него.</p>
+        <form class="authform" id="authForm">
+          <input type="text" id="authLogin" maxlength="20" placeholder="Ник: латиница, цифры, _" autocomplete="username" autocapitalize="off" spellcheck="false">
+          <input type="password" id="authPass" maxlength="100" placeholder="Пароль" autocomplete="current-password">
+          <div class="row">
+            <button class="btn" type="submit" id="authBtn">Войти</button>
+            <button class="btn ghost" type="button" id="authSwitch">Создать аккаунт</button>
+          </div>
+          <p class="err" id="authErr" role="alert"></p>
+        </form>
+      </div>
+      <div id="acctIn" hidden>
+        <div class="acct-head">
+          <span class="ava" id="acctAva"></span>
+          <div><b id="acctName"></b> <span class="muted" id="acctLogin"></span></div>
+          <button class="btn ghost small" type="button" id="logoutBtn">Выйти</button>
+        </div>
+        <form class="row" id="addFriendForm">
+          <input type="text" id="friendIn" maxlength="21" placeholder="Ник друга" autocapitalize="off" spellcheck="false" style="flex:1 1 160px">
+          <button class="btn ghost" type="submit">Добавить в друзья</button>
+        </form>
+        <p class="hint" id="friendMsg"></p>
+        <ul class="flist" id="reqList"></ul>
+        <ul class="flist" id="friendList"></ul>
+      </div>
+    </div>
     <div class="field">
       <label for="nameIn">Ваше имя</label>
       <input type="text" id="nameIn" maxlength="24" placeholder="Например, Аня" autocomplete="nickname">
@@ -287,6 +335,10 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
         <p class="label">В зале</p>
         <ul class="people" id="people"></ul>
       </div>
+      <div class="sec" id="friendsSec" hidden>
+        <p class="label">Друзья</p>
+        <ul class="flist room-friends" id="roomFriends"></ul>
+      </div>
       <div class="sec">
         <p class="label">Очередь <span id="qCount"></span></p>
         <ul class="queue" id="queue"></ul>
@@ -299,6 +351,13 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
       </form>
     </aside>
   </main>
+</div>
+
+<div class="invite-pop" id="invitePop" hidden role="alert">
+  <span class="ava" id="invAva"></span>
+  <p id="invText"></p>
+  <button class="btn small" type="button" id="invGo">Зайти</button>
+  <button class="btn ghost small" type="button" id="invNo">Не сейчас</button>
 </div>
 
 <script>
@@ -359,6 +418,7 @@ function enter(code, pass){
   store.set('divan-name', name);
   history.replaceState(null, '', '/r/'+code);
   $('#lobby').hidden = true; $('#hall').hidden = false;
+  closePresence();
   startRoom(code, name);
 }
 $('#createBtn').addEventListener('click', () => {
@@ -392,7 +452,9 @@ function connect(){
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(proto + '://' + location.host + '/ws');
   setConn(false, 'подключение…');
-  ws.onopen = () => { retry = 0; ws.send(JSON.stringify({ t:'hello', room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
+  ws.onopen = () => { retry = 0;
+    const tk = store.get('divan-token'); if (tk) ws.send(JSON.stringify({ t:'auth', token:tk }));
+    ws.send(JSON.stringify({ t:'hello', room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
   ws.onclose = () => {
     setConn(false, 'нет связи, переподключаюсь…');
@@ -427,6 +489,7 @@ function handle(m){
     case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); break;
     case 'react': floatEmoji(m.e); break;
     case 'error': if (myId) toast(m.text, 4000); else setConn(false, m.text); break;
+    case 'authok': case 'authfail': case 'presence': case 'invited': case 'friends': case 'invitesent': acctHandle(m); break;
   }
 }
 
@@ -434,6 +497,7 @@ function onRoom(m){
   const prevHost = hostId;
   hostId = m.hostId; live = m.live; peers = m.peers || [];
   queue = m.queue || []; locked = !!m.locked;
+  renderRoomFriends();
   if (prevHost !== hostId){
     // сменился ведущий: всё начинаем заново
     closeAll();
@@ -924,6 +988,7 @@ function renderPeople(){
       else c.textContent = 'подключается';
     } else c.textContent = 'зритель';
     li.append(a, n, c);
+    const fb = friendBtnFor(p); if (fb) li.append(fb);
     if (amHost() && p.id !== myId){
       const g = document.createElement('button'); g.className = 'mini'; g.type = 'button';
       g.textContent = 'сделать ведущим'; g.addEventListener('click', () => out({ t:'givehost', to:p.id }));
@@ -1003,6 +1068,205 @@ $('#installBtn').addEventListener('click', async () => {
   if (r && r.outcome === 'accepted') $('#installBox').hidden = true;
 });
 addEventListener('appinstalled', () => { $('#installBox').hidden = true; });
+
+
+/* ---------- аккаунт и друзья ---------- */
+let accountsOn = false, myUser = null, friends = [], requests = [], sent = [], authMode = 'login', pws = null, pwsRetry = 0;
+const token = () => store.get('divan-token');
+async function api(path, body){
+  const r = await fetch(path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type':'application/json', ...(token() ? { Authorization:'Bearer ' + token() } : {}) }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && path !== '/api/auth/login') { logoutLocal(); }
+  if (!r.ok) throw new Error(j.error || 'Ошибка, попробуйте ещё раз');
+  return j;
+}
+function setAuthMode(mode){
+  authMode = mode;
+  $('#authBtn').textContent = mode === 'login' ? 'Войти' : 'Создать аккаунт';
+  $('#authSwitch').textContent = mode === 'login' ? 'Создать аккаунт' : 'У меня уже есть аккаунт';
+  $('#authPass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('#authPass').placeholder = mode === 'login' ? 'Пароль' : 'Пароль (минимум 6 символов)';
+  $('#authErr').textContent = '';
+}
+$('#authSwitch').addEventListener('click', () => setAuthMode(authMode === 'login' ? 'register' : 'login'));
+$('#authForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const login = $('#authLogin').value.trim(), pass = $('#authPass').value;
+  if (!login || !pass){ $('#authErr').textContent = 'Введите ник и пароль.'; return; }
+  $('#authBtn').disabled = true; $('#authErr').textContent = '';
+  try {
+    const body = authMode === 'login' ? { login, pass } : { login, pass, name: nameIn.value.trim(), emoji: myEmoji, color: myColor };
+    const j = await api(authMode === 'login' ? '/api/auth/login' : '/api/auth/register', body);
+    store.set('divan-token', j.token); $('#authPass').value = '';
+    applyUser(j.user); await loadMe(); openPresence();
+  } catch (err) { $('#authErr').textContent = err.message; }
+  $('#authBtn').disabled = false;
+});
+function logoutLocal(){
+  try { localStorage.removeItem('divan-token'); } catch {}
+  myUser = null; friends = []; requests = []; sent = [];
+  if (pws){ pws.onclose = null; pws.close(); pws = null; }
+  renderAcct(); renderRoomFriends(); if (myId) renderPeople();
+}
+$('#logoutBtn').addEventListener('click', async () => { try { await api('/api/auth/logout', {}); } catch {} logoutLocal(); });
+
+function applyUser(u){
+  myUser = u;
+  if (u.name) { nameIn.value = u.name; store.set('divan-name', u.name); }
+  if (u.emoji) { myEmoji = u.emoji; store.set('divan-emoji', u.emoji); }
+  if (u.color) { myColor = u.color; store.set('divan-color', u.color); }
+  renderMe(); renderAcct();
+}
+async function loadMe(){
+  if (!token()) return;
+  try {
+    const j = await api('/api/me');
+    myUser = j.user; friends = j.friends || []; requests = j.requests || []; sent = j.sent || [];
+    if (!myId) applyUser(j.user);
+    renderAcct(); renderRoomFriends(); if (myId) renderPeople();
+  } catch {}
+}
+// имя, аватарка и цвет сохраняются в аккаунт
+let saveTimer = null;
+function saveProfile(){
+  if (!myUser) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    try { const j = await api('/api/me', { name: nameIn.value.trim(), emoji: myEmoji, color: myColor }); myUser = j.user; renderAcct(); } catch {}
+  }, 700);
+}
+nameIn.addEventListener('input', saveProfile);
+$('#avPick').addEventListener('click', e => { if (e.target.closest('button')) saveProfile(); });
+$('#colPick').addEventListener('click', e => { if (e.target.closest('button')) saveProfile(); });
+
+async function friendAction(kind, login, msgEl){
+  try {
+    const j = await api('/api/friends/' + kind, { login });
+    if (msgEl) msgEl.textContent = j.status === 'sent' ? 'Заявка отправлена @' + login + '. Когда друг примет её, он появится в списке.' : j.status === 'friends' ? '@' + login + ' теперь в друзьях' : '';
+    await loadMe();
+    return true;
+  } catch (err) { if (msgEl) msgEl.textContent = err.message; else if (myId) toast(err.message, 3000); return false; }
+}
+$('#addFriendForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const l = $('#friendIn').value.trim().replace(/^@/, '').toLowerCase();
+  if (!/^[a-z0-9_]{3,20}$/.test(l)){ $('#friendMsg').textContent = 'Ник — латиница, цифры и _, от 3 до 20 символов.'; return; }
+  if (myUser && l === myUser.login){ $('#friendMsg').textContent = 'Это ваш ник :)'; return; }
+  if (await friendAction('add', l, $('#friendMsg'))) $('#friendIn').value = '';
+});
+
+const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
+const avaOf = u => { const a = el('span', 'ava'); paintAva(a, u.emoji, u.color, u.name); return a; };
+const btn = (text, cls, fn) => { const b = el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
+function statusText(f){ return !f.online ? 'не в сети' : f.room ? (f.room === roomCode ? 'здесь' : 'в комнате' + (f.locked ? ' 🔒' : '')) : 'в сети'; }
+
+function renderAcct(){
+  $('#acct').hidden = !accountsOn;
+  $('#acctOut').hidden = !!myUser; $('#acctIn').hidden = !myUser;
+  if (!myUser) return;
+  paintAva($('#acctAva'), myUser.emoji, myUser.color, myUser.name);
+  $('#acctName').textContent = myUser.name; $('#acctLogin').textContent = '@' + myUser.login;
+  const rl = $('#reqList'); rl.replaceChildren();
+  for (const r of requests){
+    const li = el('li'); const w = el('span', 'who'); w.append(el('b', null, r.name), ' хочет в друзья');
+    li.append(avaOf(r), w, btn('Принять', 'btn small', () => friendAction('accept', r.login, $('#friendMsg'))), btn('Отклонить', 'btn ghost small', () => friendAction('decline', r.login)));
+    rl.append(li);
+  }
+  for (const r of sent){
+    const li = el('li'); const w = el('span', 'who', 'Заявка отправлена @' + r.login);
+    li.append(avaOf(r), w, btn('отменить', 'mini', () => friendAction('decline', r.login)));
+    rl.append(li);
+  }
+  const fl = $('#friendList'); fl.replaceChildren();
+  if (!friends.length && !requests.length && !sent.length){
+    fl.append(el('li', 'hint', 'Друзей пока нет. Попросите друга создать аккаунт и добавьте его по нику.'));
+  }
+  for (const f of friends){
+    const li = el('li');
+    const d = el('span', 'fdot' + (f.online ? (f.room ? ' room' : ' on') : '')); d.title = statusText(f);
+    const w = el('span', 'who'); w.append(el('b', null, f.name), ' ', el('span', 'muted', '@' + f.login + ' · ' + statusText(f)));
+    li.append(avaOf(f), d, w);
+    if (f.online && f.room) li.append(btn('Зайти', 'btn small', () => { location.href = '/r/' + f.room; }));
+    const del = btn('×', 'mini', () => {
+      if (del.dataset.sure){ friendAction('remove', f.login); return; }
+      del.dataset.sure = 1; del.textContent = 'удалить?'; setTimeout(() => { delete del.dataset.sure; del.textContent = '×'; }, 3000);
+    });
+    del.title = 'Удалить из друзей'; li.append(del);
+    fl.append(li);
+  }
+}
+function renderRoomFriends(){
+  const sec = $('#friendsSec'); if (!sec) return;
+  sec.hidden = !myUser;
+  if (!myUser) return;
+  const ul = $('#roomFriends'); ul.replaceChildren();
+  const here = new Set(peers.map(p => p.login).filter(Boolean));
+  const on = friends.filter(f => f.online);
+  for (const f of on){
+    const li = el('li');
+    li.append(avaOf(f), el('span', 'who', f.name));
+    if (here.has(f.login) || f.room === roomCode) li.append(el('span', 'chip ok', 'здесь'));
+    else li.append(btn('Позвать', 'btn ghost small', e => { out({ t:'invite', to:f.login }); e.target.textContent = 'Позвали ✓'; e.target.disabled = true; }));
+    ul.append(li);
+  }
+  const off = friends.length - on.length;
+  if (!friends.length) ul.append(el('li', 'hint', 'Добавьте друзей на главной странице — здесь их можно будет позвать.'));
+  else if (!on.length) ul.append(el('li', 'hint', 'Никого из друзей нет в сети.'));
+  else if (off) ul.append(el('li', 'hint', 'ещё ' + off + ' не в сети'));
+}
+function friendBtnFor(p){
+  if (!myUser || !p.login || p.login === myUser.login) return null;
+  if (friends.some(f => f.login === p.login)) { const c = el('span', 'chip', 'друг'); return c; }
+  if (sent.some(f => f.login === p.login)) return el('span', 'chip', 'заявка');
+  const incoming = requests.some(f => f.login === p.login);
+  return btn(incoming ? 'принять в друзья' : '+ в друзья', 'mini', () => friendAction(incoming ? 'accept' : 'add', p.login));
+}
+
+let invTimer = null, invRoom = null;
+function acctHandle(m){
+  switch (m.t){
+    case 'authok': if (!myUser) myUser = m.user; break;
+    case 'authfail': logoutLocal(); break;
+    case 'presence': {
+      const f = friends.find(x => x.login === m.login);
+      if (!f) { loadMe(); break; }
+      Object.assign(f, { online: m.online, room: m.room, locked: m.locked });
+      renderAcct(); renderRoomFriends();
+      break;
+    }
+    case 'friends': loadMe(); break;
+    case 'invitesent': break;
+    case 'invited': {
+      if (m.room === roomCode && myId) break;
+      invRoom = m.room;
+      paintAva($('#invAva'), m.from.emoji, m.from.color, m.from.name);
+      $('#invText').textContent = m.from.name + ' зовёт вас в комнату' + (m.locked ? ' (с паролем — спросите его)' : '');
+      $('#invitePop').hidden = false;
+      clearTimeout(invTimer); invTimer = setTimeout(() => { $('#invitePop').hidden = true; }, 60000);
+      try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Общий диван', { body: $('#invText').textContent, icon: '/icons/icon-192.png' }); } catch {}
+      break;
+    }
+  }
+}
+$('#invGo').addEventListener('click', () => { if (invRoom) location.href = '/r/' + invRoom; });
+$('#invNo').addEventListener('click', () => { $('#invitePop').hidden = true; });
+
+// в лобби держим отдельное соединение, чтобы друзья видели «в сети» и могли позвать
+function openPresence(){
+  if (!token() || myId || roomCode || pws) return;
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  pws = new WebSocket(proto + '://' + location.host + '/ws');
+  pws.onopen = () => { pwsRetry = 0; pws.send(JSON.stringify({ t:'auth', token:token() })); };
+  pws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } acctHandle(m); };
+  pws.onclose = () => { pws = null; if (!roomCode && token()) setTimeout(openPresence, Math.min(15000, 1000 * 2 ** pwsRetry++)); };
+}
+function closePresence(){ if (pws){ pws.onclose = null; pws.close(); pws = null; } }
+
+fetch('/config').then(r => r.json()).then(c => {
+  accountsOn = !!c.accounts;
+  renderAcct();
+  if (accountsOn && token()) { loadMe(); openPresence(); }
+}).catch(() => {});
 
 /* ---------- вход по ссылке на комнату (в самом конце, когда всё объявлено) ---------- */
 const preset = roomFromUrl();
