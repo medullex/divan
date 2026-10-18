@@ -1,5 +1,5 @@
 // Минимальный WebSocket-сервер на встроенных модулях Node (без зависимостей).
-// Поддерживает текстовые сообщения, ping/pong и закрытие — этого хватает для синхронизации.
+// Поддерживает текстовые и двоичные сообщения, ping/pong и закрытие.
 
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
@@ -14,6 +14,7 @@ class Socket extends EventEmitter {
     this.readyState = 1;
     this.buf = Buffer.alloc(0);
     this.frag = [];
+    this.fragOp = 0;
     sock.setNoDelay(true);
     sock.on('data', d => this._data(d));
     sock.on('close', () => this._closed());
@@ -50,10 +51,15 @@ class Socket extends EventEmitter {
       if (op === 0x9) { this._frame(0xA, payload); continue; }
       if (op === 0xA) { this.emit('pong'); continue; }
       if (op === 0x1 || op === 0x2 || op === 0x0) {
+        if (op !== 0x0) this.fragOp = op;
         this.frag.push(payload);
         const total = this.frag.reduce((n, p) => n + p.length, 0);
         if (total > this.maxPayload) return this.terminate();
-        if (fin) { const msg = Buffer.concat(this.frag); this.frag = []; this.emit('message', msg.toString('utf8')); }
+        if (fin) {
+          const msg = Buffer.concat(this.frag); this.frag = [];
+          if (this.fragOp === 0x2) this.emit('message', msg, true); // двоичные данные (кусочки видео)
+          else this.emit('message', msg.toString('utf8'), false);
+        }
       }
     }
   }
@@ -69,6 +75,8 @@ class Socket extends EventEmitter {
   }
 
   send(text) { if (this.readyState === 1) this._frame(0x1, Buffer.from(String(text), 'utf8')); }
+  sendBinary(buf) { if (this.readyState === 1) this._frame(0x2, buf); }
+  get bufferedAmount() { return this.sock.writableLength || 0; }
   ping() { if (this.readyState === 1) this._frame(0x9, Buffer.alloc(0)); }
   terminate() { this.sock.destroy(); this._closed(); }
 }
