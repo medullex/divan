@@ -157,9 +157,15 @@ const AVATARS = ['🐱', '🐶', '🦊', '🐼', '🐸', '🐵', '🦁', '🐯',
 const QUEUE_MAX = 50;
 const hashPass = (salt, pass) => crypto.createHash('sha256').update(salt + '\u0000' + pass).digest();
 
+function askRestart(r, now) { // попросить ведущего начать поток заново (нужно новому зрителю)
+  const host = r.people.get(r.hostId);
+  if (!host || (!now && Date.now() - (r.restartAt || 0) < 8000)) return;
+  r.restartAt = Date.now();
+  send(host.ws, { t: 'relayrestart' });
+}
 function getRoom(code) {
   let r = rooms.get(code);
-  if (!r) { r = { people: new Map(), hostId: null, live: null, media: null, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
+  if (!r) { r = { relay: new Set(), people: new Map(), hostId: null, live: null, media: null, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
   return r;
 }
 // Текущая позиция плеера по часам сервера — одинаковая для всех, кто подключится
@@ -167,7 +173,7 @@ function liveState(r) {
   const s = r.state;
   return { playing: s.playing, pos: s.playing ? s.pos + (Date.now() - s.at) / 1000 : s.pos };
 }
-const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null }));
+const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null, relay: r.relay.has(id) }));
 const roomInfo = r => ({ t: 'room', hostId: r.hostId, live: r.live, media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
 
 // Видео с Rutube / VK Видео из сообщения клиента -> проверенный объект (или null)
@@ -213,7 +219,7 @@ function liveRooms() {
 }
 
 // ---------- websocket ----------
-const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => {
+const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws => {
   let room = null, roomCode = null, id = null, passTries = 0;
   // антиспам: запас 80 сообщений, пополняется ~20 в секунду (WebRTC шлёт пачки служебных сообщений)
   let tokens = 80, last = Date.now();
@@ -223,7 +229,9 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
 
   // сообщения обрабатываем строго по очереди: вход в аккаунт (запрос к базе) должен закончиться раньше, чем вход в комнату
   let chain = Promise.resolve();
-  ws.on('message', raw => {
+  ws.on('message', (raw, isBinary) => {
+    if (isBinary) { chain = chain.then(() => relayChunk(raw)).catch(() => {}); return; } // кусочек видео от ведущего
+    if (raw.length > 64 * 1024) return;
     const now = Date.now();
     tokens = Math.min(80, tokens + (now - last) / 50); last = now;
     if (tokens < 1) return; tokens -= 1;
@@ -232,6 +240,17 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
     if (!m || typeof m.t !== 'string') return;
     chain = chain.then(() => onMessage(m, now)).catch(e => console.warn('ws:', e.message));
   });
+
+  // Видео «через сервер» — для зрителей, у которых сеть не пускает прямое подключение к ведущему
+  function relayChunk(buf) {
+    if (!room || room.hostId !== id || !room.relay.size) return;
+    for (const rid of room.relay) {
+      const p = room.people.get(rid);
+      if (!p || p.relayWait) continue; // ждёт начала нового потока
+      if (p.ws.bufferedAmount > 8 * 1024 * 1024) { p.relayWait = true; askRestart(room); continue; } // не успевает — начнём заново
+      p.ws.sendBinary(buf);
+    }
+  }
 
   async function onMessage(m, now) {
     if (m.t === 'auth') { // вход в аккаунт: для онлайн-статуса, друзей и приглашений
@@ -271,7 +290,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
         r.pass = { salt, hash: hashPass(salt, pass) };
       }
       for (const [pid, p] of old) {
-        r.people.delete(pid);
+        r.people.delete(pid); r.relay.delete(pid);
         if (r.hostId === pid) r.hostId = null;
         p.ws.replaced = true; send(p.ws, { t: 'replaced' }); try { p.ws.close(); } catch {}
       }
@@ -381,9 +400,26 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
       }
       case 'givehost': { // ведущий передаёт управление
         if (!isHost || !room.people.has(String(m.to))) return;
-        room.hostId = String(m.to); room.live = null; // видео с Rutube/VK остаётся, его просто ведёт новый ведущий
+        room.hostId = String(m.to); room.live = null; room.relay.delete(room.hostId); // видео с Rutube/VK остаётся, его просто ведёт новый ведущий
         room.ownerVid = room.people.get(room.hostId).vid || room.ownerVid; // передал управление — передал и комнату
         broadcast(room, roomInfo(room));
+        break;
+      }
+      case 'relay': { // зритель просит видео через сервер (или отказывается)
+        if (isHost) return;
+        if (m.on) { room.relay.add(id); me.relayWait = true; askRestart(room, true); }
+        else room.relay.delete(id);
+        broadcast(room, roomInfo(room));
+        break;
+      }
+      case 'relaystart': { // ведущий начал новый поток: следом придёт заголовок видео
+        if (!isHost) return;
+        room.relayMime = clean(m.mime, 100);
+        if (process.env.DEBUG_RELAY) console.log('relaystart', room.relayMime);
+        for (const rid of room.relay) {
+          const p = room.people.get(rid); if (!p) continue;
+          p.relayWait = false; send(p.ws, { t: 'relaystart', mime: room.relayMime });
+        }
         break;
       }
       case 'chat': {
@@ -408,7 +444,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
     ws.roomCode = null;
     accounts.detach(ws);
     if (!room || ws.replaced || room.people.get(id)?.ws !== ws) return; // эту копию уже заменила новая вкладка
-    room.people.delete(id);
+    room.people.delete(id); room.relay.delete(id);
     if (room.hostId === id) { // ведущий ушёл
       room.hostId = null;
       room.live = null;
