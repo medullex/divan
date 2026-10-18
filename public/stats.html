@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#141012">
+<title>Посетители — Общий диван</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#141012; --seat:#1f191c; --line:#3a2f33; --fg:#f2e9e4; --muted:#a8999b;
+  --lamp:#f5a742; --ok:#7cc59a; --rose:#d9707f;
+  --display:"Unbounded","Arial Black",system-ui,sans-serif;
+  --body:"Golos Text",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--body)}
+.wrap{max-width:1100px;margin:0 auto;padding:18px 16px 40px;display:flex;flex-direction:column;gap:18px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font:700 20px/1.2 var(--display);margin:0}
+h1 a{color:var(--fg);text-decoration:none}
+h1 span{color:var(--lamp)}
+.muted{color:var(--muted);font:500 12px var(--mono)}
+.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+@media (max-width:640px){.tiles{grid-template-columns:repeat(2,1fr)}}
+.tile{background:var(--seat);border:1px solid var(--line);border-radius:6px;padding:12px 14px}
+.tile b{display:block;font:700 26px/1.1 var(--display);font-variant-numeric:tabular-nums}
+.tile span{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.tile.on b{color:var(--ok)}
+.box{background:var(--seat);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{font:600 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.who b{font-weight:600}
+.who .muted{display:block;margin-top:2px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--ok);margin-right:6px;vertical-align:1px}
+.room{color:var(--lamp);font:500 12px var(--mono)}
+.err{color:var(--rose);background:var(--seat);border:1px solid var(--line);border-radius:6px;padding:16px}
+.err a{color:var(--lamp)}
+.filter{display:flex;gap:8px;flex-wrap:wrap}
+.filter button{font:600 13px var(--body);border:1px solid var(--line);background:transparent;color:var(--fg);border-radius:999px;padding:6px 14px;cursor:pointer}
+.filter button[aria-pressed="true"]{background:var(--lamp);border-color:var(--lamp);color:#2a1a06}
+/* на телефоне — карточки вместо таблицы */
+@media (max-width:720px){
+  thead{display:none}
+  table,tbody,tr,td{display:block;width:100%}
+  tr{padding:10px 12px;border-bottom:1px solid var(--line)}
+  td{border:0;padding:2px 0}
+  td[data-l]::before{content:attr(data-l) ": ";color:var(--muted);font:500 12px var(--mono)}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><a href="/">Общий <span>диван</span></a> · посетители</h1>
+    <span class="muted" id="upd">загрузка…</span>
+  </header>
+  <div id="err" class="err" hidden></div>
+  <div id="main" hidden>
+    <div class="tiles">
+      <div class="tile on"><b id="tOnline">0</b><span>сейчас на сайте</span></div>
+      <div class="tile"><b id="tToday">0</b><span>сегодня</span></div>
+      <div class="tile"><b id="tWeek">0</b><span>за 7 дней</span></div>
+      <div class="tile"><b id="tTotal">0</b><span>всего</span></div>
+    </div>
+    <div class="filter" style="margin:18px 0 10px">
+      <button type="button" data-f="all" aria-pressed="true">Все</button>
+      <button type="button" data-f="online" aria-pressed="false">Сейчас на сайте</button>
+      <button type="button" data-f="room" aria-pressed="false">Заходили в комнату</button>
+      <button type="button" data-f="look" aria-pressed="false">Только посмотрели</button>
+    </div>
+    <div class="box">
+      <table>
+        <thead><tr><th>Посетитель</th><th>Устройство</th><th>Первый раз</th><th>Последний раз</th><th>Заходов</th><th>Комната</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p class="muted" style="margin-top:12px">Посетители различаются по анонимной метке браузера. Если человек откроет сайт в другом браузере или на другом устройстве, он появится как новый гость.</p>
+  </div>
+</div>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+let token = null; try { token = localStorage.getItem('divan-token'); } catch {}
+let data = null, filter = 'all';
+const fmtT = t => {
+  if (!t) return '—';
+  const d = new Date(t), now = new Date();
+  const time = d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return 'сегодня ' + time;
+  const y = new Date(now); y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'вчера ' + time;
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }) + ' ' + time;
+};
+function td(label, ...kids){ const c = document.createElement('td'); if (label) c.dataset.l = label; c.append(...kids); return c; }
+function el(tag, cls, text){ const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; }
+function render(){
+  if (!data) return;
+  $('#tOnline').textContent = data.online; $('#tToday').textContent = data.today;
+  $('#tWeek').textContent = data.week; $('#tTotal').textContent = data.total;
+  const tb = $('#rows'); tb.replaceChildren();
+  const list = data.list.filter(v => filter === 'all' || (filter === 'online' && v.online) || (filter === 'room' && v.room) || (filter === 'look' && !v.room));
+  if (!list.length){ const tr = document.createElement('tr'); tr.append(td('', el('span', 'muted', 'Пока никого.'))); tb.append(tr); }
+  for (const v of list){
+    const tr = document.createElement('tr');
+    const who = el('div', 'who');
+    const title = el('b', null, v.name || (v.login ? '@' + v.login : 'Гость #' + (v.num || '?')));
+    if (v.online) who.append(el('span', 'dot'));
+    who.append(title);
+    const sub = [];
+    if (v.name || v.login) sub.push('Гость #' + (v.num || '?'));
+    if (v.login && v.name) sub.push('@' + v.login);
+    if (sub.length) who.append(el('span', 'muted', sub.join(' · ')));
+    const room = v.nowRoom ? el('span', 'room', 'сейчас в ' + v.nowRoom) : v.room ? el('span', 'muted', v.room + ', ' + fmtT(v.roomAt)) : el('span', 'muted', 'не заходил');
+    tr.append(td('', who), td('Устройство', v.dev || '—'), td('Первый раз', fmtT(v.first)), td('Последний раз', v.online ? 'сейчас' : fmtT(v.last)),
+      Object.assign(td('Заходов', String(v.visits)), { className: 'num' }), td('Комната', room));
+    tb.append(tr);
+  }
+}
+async function load(){
+  try {
+    const r = await fetch('/api/stats', { headers: token ? { Authorization: 'Bearer ' + token } : {}, cache: 'no-store' });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || 'Ошибка ' + r.status);
+    data = j; $('#err').hidden = true; $('#main').hidden = false;
+    $('#upd').textContent = 'обновлено ' + new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    render();
+  } catch (e) {
+    $('#err').hidden = false; $('#main').hidden = !data;
+    $('#err').innerHTML = ''; $('#err').append(e.message, ' ');
+    if (!token){ const a = el('a', null, 'Перейти на главную'); a.href = '/'; $('#err').append(a); }
+    $('#upd').textContent = '';
+  }
+}
+document.querySelector('.filter').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  filter = b.dataset.f;
+  for (const x of document.querySelectorAll('.filter button')) x.setAttribute('aria-pressed', x === b);
+  render();
+});
+load(); setInterval(load, 30000);
+})();
+</script>
+</body>
+</html>
