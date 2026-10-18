@@ -456,7 +456,7 @@ $('#joinCodeBtn').addEventListener('click', () => {
 $('#codeIn').addEventListener('keydown', e => { if (e.key==='Enter') $('#joinCodeBtn').click(); });
 nameIn.addEventListener('keydown', e => { if (e.key==='Enter') $('#createBtn').click(); });
 /* ---------- состояние ---------- */
-let ws = null, myId = null, roomCode = null, myName = '', retry = 0;
+let ws = null, myId = null, roomCode = null, myName = '', retry = 0, replaced = false;
 let hostId = null, live = null, peers = [], chat = [], queue = [], locked = false;
 let iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
 const pcs = new Map();      // ведущий: id зрителя -> соединение; зритель: id ведущего -> соединение
@@ -480,8 +480,9 @@ function connect(){
     ws.send(JSON.stringify({ t:'hello', vid:VID, room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
   ws.onmessage = e => { let m; try { m = JSON.parse(e.data); } catch { return; } handle(m); };
   ws.onclose = () => {
-    setConn(false, 'нет связи, переподключаюсь…');
     closeAll(); myId = null;
+    if (replaced){ setConn(false, 'комната открыта в другой вкладке'); return; } // не спорим с новой вкладкой
+    setConn(false, 'нет связи, переподключаюсь…');
     setTimeout(connect, Math.min(10000, 800 * 2 ** retry++));
   };
 }
@@ -512,6 +513,12 @@ function handle(m){
     case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); break;
     case 'react': floatEmoji(m.e); break;
     case 'error': if (myId) toast(m.text, 4000); else setConn(false, m.text); break;
+    case 'replaced':
+      replaced = true;
+      $('#empty').hidden = false; $('#emptyTitle').textContent = 'Комната открыта в другой вкладке';
+      $('#emptyText').textContent = 'Эта вкладка отключена, чтобы вы не числились в комнате дважды. Обновите страницу, чтобы смотреть здесь.';
+      $('#retryBtn').hidden = true;
+      break;
     case 'authok': case 'authfail': case 'presence': case 'invited': case 'friends': case 'invitesent': acctHandle(m); break;
   }
 }
@@ -993,7 +1000,8 @@ function renderRole(){
       $('#emptyPick').hidden = true; $('#retryBtn').hidden = true;
     }
   } else {
-    $('#roleNote').textContent = 'Ведущий — ' + nameOf(hostId) + '. Видео, пауза и перемотка у вас меняются вместе с ним.';
+    $('#roleNote').textContent = hostId ? 'Ведущий — ' + nameOf(hostId) + '. Видео, пауза и перемотка у вас меняются вместе с ним.'
+      : 'Ведущий переподключается… Если он не вернётся за 20 секунд, управление перейдёт другому.';
     $('#emptyPick').hidden = true; $('#fname').textContent = live ? live.title : '';
     if (!v.srcObject){
       $('#empty').hidden = false;
