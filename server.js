@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const miniws = require('./miniws');
 const accounts = require('./accounts');
+const stats = require('./stats');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
@@ -46,6 +47,11 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ iceServers: ICE, accounts: accounts.enabled }));
   }
   if (/^\/api\/(auth|me|friends|avatar)(\/|$)/.test(url.pathname)) { accounts.handle(req, res, url.pathname); return; }
+  if (url.pathname === '/api/hit' || url.pathname === '/api/stats') {
+    stats.handle(req, res, url.pathname, { userByToken: accounts.userByToken, liveRooms });
+    return;
+  }
+  if (url.pathname === '/stats') url.pathname = '/stats.html';
   if (url.pathname === '/api/search') return apiSearch(url.searchParams.get('q'), res);
   if (url.pathname === '/api/rutube') return apiRutubeInfo(url.searchParams.get('id'), res);
   const file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
@@ -173,6 +179,13 @@ const validCode = c => typeof c === 'string' && /^[a-z0-9-]{3,32}$/.test(c);
 
 accounts.setRoomLocked(code => !!(rooms.get(code) && rooms.get(code).pass));
 
+// кто сейчас в какой комнате (для списка посетителей): метка посетителя -> код комнаты
+function liveRooms() {
+  const m = new Map();
+  for (const [code, r] of rooms) for (const p of r.people.values()) if (p.vid) m.set(p.vid, code);
+  return m;
+}
+
 // ---------- websocket ----------
 const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => {
   let room = null, roomCode = null, id = null, passTries = 0;
@@ -234,7 +247,8 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 64 * 1024 }, ws => 
         : (COLORS.find(c => !used.has(c)) || COLORS[r.people.size % COLORS.length]);
       const emoji = AVATARS.includes(m.emoji) ? m.emoji : null;
       const u = ws.user; // вошёл в аккаунт — показываем имя и аватарку из профиля
-      r.people.set(id, { ws, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null, ava: u ? u.ava : null });
+      if (/^[a-f0-9]{16}$/.test(String(m.vid || ''))) { ws.vid = String(m.vid); stats.touch(ws.vid); }
+      r.people.set(id, { ws, vid: ws.vid || null, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null, ava: u ? u.ava : null });
       roomCode = m.room; ws.roomCode = m.room;
       if (u) accounts.notifyFriends(u.login);
       if (!r.hostId) r.hostId = id; // первый вошедший — ведущий
