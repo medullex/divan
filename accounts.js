@@ -288,6 +288,6 @@ async function accept(L, other, res) {
 }
 
 module.exports = {
-  enabled, handle, attach, detach, notifyFriends, presenceOf, isFriend, toUser,
+  enabled, handle, attach, detach, notifyFriends, presenceOf, isFriend, toUser, userByToken,
   setRoomLocked: fn => { roomLocked = fn; },
 };
