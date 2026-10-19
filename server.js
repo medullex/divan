@@ -1,21 +1,30 @@
 // Общий диван — сервер комнат.
-// Отдаёт страницу и пересылает служебные сообщения между зрителями одной комнаты:
-// чат, реакции и «рукопожатия» WebRTC. Само видео идёт напрямую из браузера ведущего
-// к браузерам зрителей и через этот сервер не проходит.
+// Отдаёт страницу и пересылает сообщения между зрителями одной комнаты: чат, реакции, синхронизацию.
+// Видео с Rutube/VK идёт из их плееров. Файл с компьютера ведущий загружает сюда, во временную папку,
+// и зрители смотрят его обычной ссылкой /media/<id>. Файл удаляется, когда загрузивший ушёл из комнаты.
 
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
 const miniws = require('./miniws');
 const accounts = require('./accounts');
 const stats = require('./stats');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC = path.join(__dirname, 'public');
-const MAX_PEOPLE = 12;        // человек в одной комнате (ведущий раздаёт видео каждому сам)
+const MAX_PEOPLE = 12;        // человек в одной комнате
 const CHAT_KEEP = 60;         // сколько сообщений помнит комната
 const ROOM_TTL = 6 * 3600e3;  // пустая комната живёт 6 часов
+const UPLOAD_DIR = path.join(os.tmpdir(), 'divan-uploads');
+const MAX_UPLOAD = (Number(process.env.MAX_UPLOAD_MB) || 2500) * 1024 * 1024;
+const OWNER_GRACE = 20000;    // столько ждём загрузившего после перезагрузки страницы, прежде чем удалить файл
+const VIDEO_TYPES = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm', '.mkv': 'video/x-matroska', '.avi': 'video/x-msvideo', '.ogv': 'video/ogg' };
+// при старте — пустая папка (файлы от прошлого запуска уже никому не нужны)
+try { fs.rmSync(UPLOAD_DIR, { recursive: true, force: true }); } catch {}
+fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+const files = new Map(); // id -> { path, size, mime } — опубликованные файлы, которые можно смотреть
 
 // STUN/TURN-серверы для WebRTC. TURN можно добавить через переменные окружения на хостинге.
 const ICE = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] }];
@@ -77,6 +86,8 @@ const server = http.createServer((req, res) => {
     stats.handle(req, res, url.pathname, { userByToken: accounts.userByToken, liveRooms });
     return;
   }
+  if (url.pathname === '/api/upload') return apiUpload(req, res, url.searchParams.get('t'));
+  if (url.pathname.startsWith('/media/')) return serveMedia(req, res, url.pathname.slice(7));
   if (url.pathname === '/stats') url.pathname = '/stats.html';
   if (url.pathname === '/api/search') return apiSearch(url.searchParams.get('q'), res);
   if (url.pathname === '/api/rutube') return apiRutubeInfo(url.searchParams.get('id'), res);
@@ -95,6 +106,126 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
+
+// долгие загрузки фильма не должны обрываться таймаутом сервера (по умолчанию 5 минут)
+server.requestTimeout = 0;
+server.timeout = 0;
+
+// ---------- фильм с компьютера ведущего ----------
+const randId = n => crypto.randomBytes(n).toString('hex');
+function unlinkQuiet(f) { if (f) fs.unlink(f, () => {}); }
+function findUpload(token) {
+  if (typeof token !== 'string' || !/^[a-f0-9]{48}$/.test(token)) return null;
+  for (const [code, r] of rooms) if (r.upload && r.upload.token === token) return { code, r, up: r.upload };
+  return null;
+}
+// приём файла: тело запроса пишется на диск по кусочкам, в памяти не держим
+function apiUpload(req, res, token) {
+  if (req.method !== 'POST') { res.writeHead(405); return res.end(); }
+  const f = findUpload(token);
+  if (!f || f.up.started) return json(res, 403, { error: 'Загрузка не разрешена. Выберите файл ещё раз.' });
+  const { r, up } = f;
+  const len = Number(req.headers['content-length']);
+  if (len !== up.size) return json(res, 400, { error: 'Размер файла не совпал. Выберите файл ещё раз.' });
+  up.started = true; up.req = req;
+  const tmp = path.join(UPLOAD_DIR, up.id + '.part');
+  const out = fs.createWriteStream(tmp);
+  let got = 0, done = false, lastSent = 0;
+  const fail = (code, text) => {
+    if (done) return; done = true;
+    out.destroy(); unlinkQuiet(tmp);
+    if (r.upload === up) { r.upload = null; broadcast(r, roomInfo(r)); }
+    if (!res.headersSent) json(res, code, { error: text });
+    req.resume();
+  };
+  up.abort = () => fail(409, 'Загрузка отменена');
+  req.on('data', chunk => {
+    got += chunk.length;
+    if (got > up.size) { fail(400, 'Файл больше заявленного'); req.destroy(); return; }
+    if (!out.write(chunk)) { req.pause(); out.once('drain', () => req.resume()); }
+    up.loaded = got;
+    const now = Date.now();
+    if (now - lastSent > 700) { lastSent = now; broadcast(r, { t: 'upprog', gen: up.gen, loaded: got, total: up.size }); }
+  });
+  req.on('aborted', () => fail(400, 'Загрузка прервалась'));
+  req.on('error', () => fail(400, 'Загрузка прервалась'));
+  out.on('error', e => { console.warn('upload write:', e.message); fail(507, 'На сервере не хватило места'); });
+  req.on('end', () => {
+    if (done) return;
+    if (got !== up.size) return fail(400, 'Файл пришёл не целиком');
+    out.end(() => {
+      if (done) return; done = true;
+      if (r.upload !== up) { unlinkQuiet(tmp); return json(res, 409, { error: 'Загрузка отменена' }); }
+      const final = path.join(UPLOAD_DIR, up.id + up.ext);
+      fs.rename(tmp, final, err => {
+        if (err || r.upload !== up) { unlinkQuiet(tmp); unlinkQuiet(final); if (r.upload === up) { r.upload = null; broadcast(r, roomInfo(r)); } return json(res, 500, { error: 'Не удалось сохранить файл' }); }
+        r.upload = null;
+        files.set(up.id, { path: final, size: up.size, mime: VIDEO_TYPES[up.ext] || 'application/octet-stream' });
+        playMedia(r, { kind: 'file', id: up.id, title: up.name, size: up.size, gen: up.gen }, Date.now(), up.vid);
+        json(res, 200, { ok: true, id: up.id });
+      });
+    });
+  });
+}
+// отдача фильма с поддержкой Range (перемотка; без этого iPhone не играет)
+function serveMedia(req, res, id) {
+  const f = /^[a-f0-9]{32}$/.test(id) ? files.get(id) : null;
+  if (!f || (req.method !== 'GET' && req.method !== 'HEAD')) { res.writeHead(404); return res.end(); }
+  const head = { 'Content-Type': f.mime, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' };
+  const range = String(req.headers.range || '');
+  let start = 0, end = f.size - 1, code = 200;
+  if (range) {
+    const m = range.match(/^bytes=(\d*)-(\d*)$/);
+    if (!m || (m[1] === '' && m[2] === '')) { res.writeHead(416, { 'Content-Range': 'bytes */' + f.size }); return res.end(); }
+    if (m[1] === '') { start = Math.max(0, f.size - Number(m[2])); }
+    else { start = Number(m[1]); if (m[2] !== '') end = Math.min(end, Number(m[2])); }
+    if (start > end || start >= f.size) { res.writeHead(416, { 'Content-Range': 'bytes */' + f.size }); return res.end(); }
+    code = 206; head['Content-Range'] = `bytes ${start}-${end}/${f.size}`;
+  }
+  head['Content-Length'] = end - start + 1;
+  res.writeHead(code, head);
+  if (req.method === 'HEAD' || f.size === 0) return res.end();
+  const s = fs.createReadStream(f.path, { start, end });
+  s.on('error', () => res.destroy());
+  res.on('close', () => s.destroy());
+  s.pipe(res);
+}
+// убрать фильм комнаты с диска (и из плеера у всех, если он ещё показывается)
+function dropFile(r, silent) {
+  clearTimeout(r.fileTimer); r.fileTimer = null;
+  if (!r.file) return;
+  const f = files.get(r.file.id);
+  files.delete(r.file.id);
+  if (f) unlinkQuiet(f.path);
+  const wasPlaying = r.media && r.media.kind === 'file' && r.media.id === r.file.id;
+  r.file = null;
+  if (wasPlaying) {
+    r.media = null; r.state = { playing: false, pos: 0, at: Date.now() };
+    if (!silent) broadcast(r, roomInfo(r));
+  }
+}
+function cancelUpload(r) {
+  const up = r.upload; if (!up) return;
+  r.upload = null;
+  if (up.abort) up.abort();
+  if (up.req) try { up.req.destroy(); } catch {}
+}
+// загрузивший ушёл? ждём 20 секунд (вдруг перезагрузил страницу), потом удаляем фильм
+function checkFileOwner(r) {
+  if (!r.file) return;
+  const here = r.file.vid && [...r.people.values()].some(p => p.vid === r.file.vid);
+  if (here) { clearTimeout(r.fileTimer); r.fileTimer = null; return; }
+  if (r.fileTimer) return;
+  if (!r.file.vid) return dropFile(r);
+  r.fileTimer = setTimeout(() => { r.fileTimer = null; checkFileOwnerNow(r); }, OWNER_GRACE);
+}
+function checkFileOwnerNow(r) {
+  if (!r.file) return;
+  if (!(r.file.vid && [...r.people.values()].some(p => p.vid === r.file.vid))) dropFile(r);
+}
+async function freeSpace() {
+  try { const st = await fs.promises.statfs(UPLOAD_DIR); return st.bavail * st.bsize; } catch { return Infinity; }
+}
 
 // ---------- поиск по Rutube ----------
 // Используем открытый поиск Rutube. Видео потом показывается в официальном плеере Rutube.
@@ -149,23 +280,19 @@ async function apiRutubeInfo(id, res) {
 }
 
 // ---------- комнаты ----------
-/** code -> { people: Map<id,{ws,name,color}>, hostId, live: {title}|null, media: {...}|null,
- *            state: {playing,pos,at}, chat[], emptySince } */
+/** code -> { people: Map<id,{ws,vid,name,color}>, hostId, media: {...}|null, queue[], pass,
+ *            state: {playing,pos,at}, chat[], emptySince,
+ *            upload: {token,gen,id,vid,name,size,ext,loaded}|null — идёт загрузка фильма,
+ *            file: {id, vid}|null — загруженный фильм и метка браузера загрузившего } */
 const rooms = new Map();
 const COLORS = ['#f5a742', '#d9707f', '#7cc59a', '#8fb3e8', '#c9a0e8', '#e8d27c', '#6fd0c8', '#f08a5d'];
 const AVATARS = ['🐱', '🐶', '🦊', '🐼', '🐸', '🐵', '🦁', '🐯', '🐨', '🐰', '🦄', '🐙', '👽', '🤖', '👻', '💀', '🎃', '🍕', '🍿', '🎬', '⭐', '🔥', '🌚', '😎'];
 const QUEUE_MAX = 50;
 const hashPass = (salt, pass) => crypto.createHash('sha256').update(salt + '\u0000' + pass).digest();
 
-function askRestart(r, now) { // попросить ведущего начать поток заново (нужно новому зрителю)
-  const host = r.people.get(r.hostId);
-  if (!host || (!now && Date.now() - (r.restartAt || 0) < 8000)) return;
-  r.restartAt = Date.now();
-  send(host.ws, { t: 'relayrestart' });
-}
 function getRoom(code) {
   let r = rooms.get(code);
-  if (!r) { r = { relay: new Set(), people: new Map(), hostId: null, live: null, media: null, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
+  if (!r) { r = { people: new Map(), hostId: null, media: null, upload: null, file: null, upGen: 0, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
   return r;
 }
 // Текущая позиция плеера по часам сервера — одинаковая для всех, кто подключится
@@ -173,8 +300,9 @@ function liveState(r) {
   const s = r.state;
   return { playing: s.playing, pos: s.playing ? s.pos + (Date.now() - s.at) / 1000 : s.pos };
 }
-const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null, relay: r.relay.has(id) }));
-const roomInfo = r => ({ t: 'room', hostId: r.hostId, live: r.live, media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
+const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null }));
+const uploadInfo = r => r.upload ? { gen: r.upload.gen, name: r.upload.name, total: r.upload.size, loaded: r.upload.loaded || 0 } : null;
+const roomInfo = r => ({ t: 'room', hostId: r.hostId, upload: uploadInfo(r), media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
 
 // Видео с Rutube / VK Видео из сообщения клиента -> проверенный объект (или null)
 function makeMedia(m) {
@@ -192,10 +320,11 @@ function makeMedia(m) {
   }
   return media;
 }
-function playMedia(room, media, now) {
+function playMedia(room, media, now, fileVid) {
   if (media) { media = { ...media, n: now }; delete media.qid; delete media.by; delete media.byName; }
+  dropFile(room, true); // прежний фильм с компьютера больше не нужен
+  if (media && media.kind === 'file') { room.file = { id: media.id, vid: fileVid || null }; }
   room.media = media;
-  if (media) room.live = null;
   room.state = { playing: false, pos: 0, at: now };
   broadcast(room, roomInfo(room));
 }
@@ -221,7 +350,7 @@ function liveRooms() {
 // ---------- websocket ----------
 const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws => {
   let room = null, roomCode = null, id = null, passTries = 0;
-  // антиспам: запас 80 сообщений, пополняется ~20 в секунду (WebRTC шлёт пачки служебных сообщений)
+  // антиспам: запас 80 сообщений, пополняется ~20 в секунду
   let tokens = 80, last = Date.now();
 
   ws.isAlive = true;
@@ -230,7 +359,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
   // сообщения обрабатываем строго по очереди: вход в аккаунт (запрос к базе) должен закончиться раньше, чем вход в комнату
   let chain = Promise.resolve();
   ws.on('message', (raw, isBinary) => {
-    if (isBinary) { chain = chain.then(() => relayChunk(raw)).catch(() => {}); return; } // кусочек видео от ведущего
+    if (isBinary) return;
     if (raw.length > 64 * 1024) return;
     const now = Date.now();
     tokens = Math.min(80, tokens + (now - last) / 50); last = now;
@@ -240,17 +369,6 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
     if (!m || typeof m.t !== 'string') return;
     chain = chain.then(() => onMessage(m, now)).catch(e => console.warn('ws:', e.message));
   });
-
-  // Видео «через сервер» — для зрителей, у которых сеть не пускает прямое подключение к ведущему
-  function relayChunk(buf) {
-    if (!room || room.hostId !== id || !room.relay.size) return;
-    for (const rid of room.relay) {
-      const p = room.people.get(rid);
-      if (!p || p.relayWait) continue; // ждёт начала нового потока
-      if (p.ws.bufferedAmount > 8 * 1024 * 1024) { p.relayWait = true; askRestart(room); continue; } // не успевает — начнём заново
-      p.ws.sendBinary(buf);
-    }
-  }
 
   async function onMessage(m, now) {
     if (m.t === 'auth') { // вход в аккаунт: для онлайн-статуса, друзей и приглашений
@@ -290,7 +408,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         r.pass = { salt, hash: hashPass(salt, pass) };
       }
       for (const [pid, p] of old) {
-        r.people.delete(pid); r.relay.delete(pid);
+        r.people.delete(pid);
         if (r.hostId === pid) r.hostId = null;
         p.ws.replaced = true; send(p.ws, { t: 'replaced' }); try { p.ws.close(); } catch {}
       }
@@ -308,10 +426,10 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
       if (!r.ownerVid && vid && !r.hostId) r.ownerVid = vid; // первый вошедший — создатель комнаты
       // ведущим становится: первый вошедший; создатель, вернувшийся в комнату; ведущий, который перезагрузил страницу
       if (!r.hostId || isOwner || (vid && vid === r.graceVid)) {
-        if (r.hostId && r.hostId !== id) r.live = null; // у прежнего ведущего прекращается показ его файла
         r.hostId = id;
         clearTimeout(r.graceTimer); r.graceVid = null;
       }
+      checkFileOwner(r); // загрузивший фильм вернулся — фильм не удаляем
       send(ws, { ...roomInfo(r), t: 'welcome', id, chat: r.chat });
       broadcast(r, roomInfo(r), id);
       return;
@@ -321,16 +439,27 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
     const isHost = room.hostId === id;
 
     switch (m.t) {
-      case 'signal': { // WebRTC: пересылаем конкретному участнику
-        const target = room.people.get(String(m.to));
-        if (!target || typeof m.data !== 'object') return;
-        send(target.ws, { t: 'signal', from: id, data: m.data });
+      case 'upreq': { // ведущий хочет загрузить фильм со своего компьютера
+        if (!isHost) return;
+        const name = clean(m.name, 200) || 'Видео';
+        const size = Number(m.size);
+        let ext = path.extname(name).toLowerCase(); if (!VIDEO_TYPES[ext]) ext = '.mp4';
+        if (!Number.isSafeInteger(size) || size <= 0) return send(ws, { t: 'upfail', text: 'Пустой файл' });
+        if (size > MAX_UPLOAD) return send(ws, { t: 'upfail', text: `Файл слишком большой: можно до ${Math.round(MAX_UPLOAD / 1048576)} МБ` });
+        cancelUpload(room); // предыдущая незаконченная загрузка больше не нужна
+        const reserve = 200 * 1048576;
+        const free = await freeSpace() + (room.file && files.get(room.file.id) ? files.get(room.file.id).size : 0);
+        if (free < size + reserve) return send(ws, { t: 'upfail', text: 'На сервере сейчас не хватает места для такого файла' });
+        if (room.hostId !== id) return;
+        const up = { token: randId(24), gen: ++room.upGen, id: randId(16), vid: me.vid || null, name: name.replace(/\.[a-z0-9]{1,5}$/i, '') || name, size, ext, loaded: 0 };
+        room.upload = up;
+        send(ws, { t: 'uptoken', token: up.token, gen: up.gen });
+        broadcast(room, roomInfo(room));
         break;
       }
-      case 'live': { // ведущий начал/закончил показ своего файла
-        if (!isHost) return;
-        room.live = m.on ? { title: clean(m.title, 120) || 'Видео' } : null;
-        if (m.on) room.media = null;
+      case 'upcancel': { // ведущий отменил загрузку
+        if (!room.upload || room.upload.vid !== me.vid) return;
+        cancelUpload(room);
         broadcast(room, roomInfo(room));
         break;
       }
@@ -384,7 +513,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         for (const p of room.people.values()) if (p.login) accounts.notifyFriends(p.login);
         break;
       }
-      case 'sync': { // ведущий: состояние плеера Rutube/VK (пауза, время)
+      case 'sync': { // ведущий: состояние плеера (пауза, время)
         if (!isHost || !room.media) return;
         const pos = Number(m.pos);
         if (!Number.isFinite(pos) || pos < 0 || pos > 1e6) return;
@@ -392,34 +521,11 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         broadcast(room, { t: 'sync', playing: !!m.playing, pos, ev: m.ev ? 1 : 0 }, id);
         break;
       }
-      case 'control': { // ведущий: пауза/плей/перемотка — для подсказок у зрителей
-        if (!isHost) return;
-        const pos = Number(m.pos);
-        broadcast(room, { t: 'control', playing: !!m.playing, pos: Number.isFinite(pos) ? pos : 0, dur: Number(m.dur) || 0 }, id);
-        break;
-      }
       case 'givehost': { // ведущий передаёт управление
         if (!isHost || !room.people.has(String(m.to))) return;
-        room.hostId = String(m.to); room.live = null; room.relay.delete(room.hostId); // видео с Rutube/VK остаётся, его просто ведёт новый ведущий
+        room.hostId = String(m.to); // видео остаётся (и фильм с компьютера тоже), его просто ведёт новый ведущий
         room.ownerVid = room.people.get(room.hostId).vid || room.ownerVid; // передал управление — передал и комнату
         broadcast(room, roomInfo(room));
-        break;
-      }
-      case 'relay': { // зритель просит видео через сервер (или отказывается)
-        if (isHost) return;
-        if (m.on) { room.relay.add(id); me.relayWait = true; askRestart(room, true); }
-        else room.relay.delete(id);
-        broadcast(room, roomInfo(room));
-        break;
-      }
-      case 'relaystart': { // ведущий начал новый поток: следом придёт заголовок видео
-        if (!isHost) return;
-        room.relayMime = clean(m.mime, 100);
-        if (process.env.DEBUG_RELAY) console.log('relaystart', room.relayMime);
-        for (const rid of room.relay) {
-          const p = room.people.get(rid); if (!p) continue;
-          p.relayWait = false; send(p.ws, { t: 'relaystart', mime: room.relayMime });
-        }
         break;
       }
       case 'chat': {
@@ -444,10 +550,11 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
     ws.roomCode = null;
     accounts.detach(ws);
     if (!room || ws.replaced || room.people.get(id)?.ws !== ws) return; // эту копию уже заменила новая вкладка
-    room.people.delete(id); room.relay.delete(id);
+    room.people.delete(id);
+    // загрузка фильма идёт отдельным запросом: если вкладку закрыли, он оборвётся сам
+    checkFileOwner(room);
     if (room.hostId === id) { // ведущий ушёл
       room.hostId = null;
-      room.live = null;
       if (room.state.playing) room.state = { ...liveState(room), playing: false, at: Date.now() }; // ставим на паузу
       const r = room;
       const pass = () => { r.graceVid = null; if (!r.hostId && r.people.size) { r.hostId = r.people.keys().next().value; broadcast(r, roomInfo(r)); } };
@@ -467,7 +574,7 @@ setInterval(() => {
     ws.isAlive = false; ws.ping();
   }
   const now = Date.now();
-  for (const [code, r] of rooms) if (r.emptySince && now - r.emptySince > ROOM_TTL) rooms.delete(code);
+  for (const [code, r] of rooms) if (r.emptySince && now - r.emptySince > ROOM_TTL) { cancelUpload(r); dropFile(r, true); rooms.delete(code); }
 }, 25000);
 
 server.listen(PORT, () => console.log(`Общий диван запущен: http://localhost:${PORT}`));
