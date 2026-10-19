@@ -34,6 +34,10 @@ Node.js без внешних зависимостей (`npm install` ничег
    при выборе другого видео, при отмене/обрыве загрузки. Передача роли ведущего файл НЕ удаляет.
    WS: `upreq{name,size}` → `uptoken{token,gen}` / `upfail{text}`; `upprog{gen,loaded,total}`; `upcancel`;
    в `room` есть `upload{gen,name,total,loaded}`, фильм — `media{kind:'file',id,title,size,gen,n}`.
+   **Просмотр во время загрузки:** браузер ведущего переставляет moov в начало MP4 (как qt-faststart, `prepareBody`),
+   шлёт `upreq{dur, early}`; при early сервер сразу публикует `media{partial:true}`, `/media/<id>` отдаёт растущий файл
+   (`streamGrowing`). Сервер считает по скорости загрузки и длительности, когда можно начинать (`judgeEarly` → `upprog{safe,wait}`);
+   ведущий не может нажать ▶ раньше и перемотать дальше загруженного.
    WebRTC и ретранслятор «через сервер» удалены (19.10.2026). `/config` и nettest.html остались, но для видео не нужны.
 
 ### Комнаты и ведущий
