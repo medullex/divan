@@ -98,6 +98,59 @@ input[type=text]{min-width:0;background:var(--bg);color:var(--fg);border:1px sol
 .chatform .ico{background:none;border:1px solid var(--line);color:var(--fg);border-radius:999px;width:40px;flex:none;font-size:18px;cursor:pointer;padding:0}
 .chatform .ico:hover{border-color:var(--lamp)}
 .reacts .more{font-size:18px;color:var(--muted)}
+/* свой плеер для фильма с компьютера */
+.pctl{position:absolute;inset:0;z-index:2;display:flex;flex-direction:column;justify-content:flex-end;transition:opacity .3s}
+.pctl.idle{opacity:0;cursor:none}
+.pctl.idle .pbar{transform:translateY(12px)}
+.pclick{position:absolute;inset:0}
+.pbig{position:absolute;left:50%;top:50%;width:76px;height:76px;margin:-38px 0 0 -38px;border-radius:50%;border:0;cursor:pointer;
+  background:color-mix(in srgb,var(--lamp) 88%,transparent);color:var(--lamp-ink);display:grid;place-items:center;
+  box-shadow:0 8px 30px rgba(0,0,0,.45);transition:transform .2s cubic-bezier(.3,1.6,.5,1),opacity .2s}
+.pbig svg{width:34px;height:34px;margin-left:4px}
+.pbig:hover{transform:scale(1.1)}
+.pbig:active{transform:scale(.92)}
+.pbig.gone{opacity:0;transform:scale(1.5);pointer-events:none}
+.pbar{position:relative;padding:28px 12px 8px;background:linear-gradient(transparent,rgba(0,0,0,.8));transition:transform .3s}
+.pseek{position:relative;height:5px;border-radius:999px;background:rgba(255,255,255,.18);cursor:pointer;margin:0 4px 6px;transition:height .15s}
+.pseek:hover,.pseek.drag{height:8px}
+.pseek.ro{cursor:default}
+.pseek > div{position:absolute;inset:0 auto 0 0;border-radius:inherit;width:0}
+.pload{background:repeating-linear-gradient(45deg,rgba(255,255,255,.14) 0 6px,rgba(255,255,255,.06) 6px 12px)}
+.pbuf{background:rgba(255,255,255,.3)}
+.pfill{background:var(--lamp)}
+.pknob{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;background:var(--lamp);box-shadow:0 0 0 3px rgba(0,0,0,.35);
+  transform:scale(0);transition:transform .15s}
+.pseek:hover .pknob,.pseek.drag .pknob{transform:scale(1)}
+.pseek.ro .pknob{display:none}
+.ptip{position:absolute;bottom:14px;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;font:500 12px var(--mono);padding:2px 6px;border-radius:4px;pointer-events:none;white-space:nowrap}
+.prow{display:flex;align-items:center;gap:2px;color:#fff}
+.prow button{background:none;border:0;color:#fff;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;cursor:pointer;padding:0;
+  transition:transform .15s cubic-bezier(.3,1.6,.5,1),background .15s}
+.prow button:hover{background:rgba(255,255,255,.14);transform:scale(1.12)}
+.prow button:active{transform:scale(.88)}
+.prow button svg{width:22px;height:22px}
+.prow .skip{font:700 11px var(--body);position:relative}
+.prow .skip svg{position:absolute;inset:8px}
+.prow .skip span{position:relative;top:1px}
+.prow .skip.spin svg{animation:spinb .35s ease-out}
+.prow .skip.spinf svg{animation:spinf .35s ease-out}
+@keyframes spinb{from{transform:rotate(0)}to{transform:rotate(-360deg)}}
+@keyframes spinf{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+.prow .bump{animation:bump .3s cubic-bezier(.3,1.6,.5,1)}
+@keyframes bump{0%{transform:scale(.7)}100%{transform:scale(1)}}
+.ptime{font:500 12.5px var(--mono);padding:0 8px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.pgap{flex:1}
+.pvol{display:flex;align-items:center}
+.pvol input{width:0;opacity:0;transition:width .25s,opacity .25s;accent-color:var(--lamp);margin:0}
+.pvol:hover input,.pvol input:focus-visible{width:80px;opacity:1;margin:0 6px 0 2px}
+.pflash{position:absolute;left:50%;top:50%;width:64px;height:64px;margin:-32px 0 0 -32px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;
+  display:grid;place-items:center;pointer-events:none;animation:flash .6s ease-out forwards;font:700 13px var(--body)}
+.pflash svg{width:30px;height:30px}
+@keyframes flash{0%{opacity:0;transform:scale(.6)}25%{opacity:1}100%{opacity:0;transform:scale(1.4)}}
+.screen:fullscreen{border-radius:0;aspect-ratio:auto}
+.screen .floaters{z-index:3}.screen .bottombar{z-index:4}.screen .toast{z-index:5}
+@media (max-width:560px){.pvol input{display:none}.ptime{font-size:11px;padding:0 4px}.prow button{width:34px;height:34px}}
+@media (prefers-reduced-motion:reduce){.pbig,.prow button,.pctl,.pbar,.pknob{transition:none}.pflash,.prow .bump,.prow .skip svg{animation:none!important}}
 
 /* лобби */
 .lobby{max-width:520px;margin:6vh auto 0;display:flex;flex-direction:column;gap:22px}
@@ -233,6 +286,11 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 .fdot.room{background:var(--lamp)}
 .flist .btn.small{flex:none}
 .room-friends{max-height:150px;overflow-y:auto}
+.flist.sug{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px}
+.flist .watch{display:block;color:var(--lamp);font:500 12px var(--body);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.reqbadge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:999px;background:var(--rose);color:#fff;font:700 11px var(--body);margin-left:6px;vertical-align:1px}
+@keyframes popin{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}
+.reqbadge{animation:popin .25s ease-out}
 .invite-pop{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;background:var(--seat);border:1px solid var(--lamp);border-radius:10px;
   padding:12px 14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;box-shadow:0 10px 40px rgba(0,0,0,.5);width:min(440px,calc(100% - 32px))}
 .invite-pop p{margin:0;flex:1 1 180px;font-size:14px}
@@ -270,9 +328,10 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
           <button class="btn ghost small" type="button" id="logoutBtn">Выйти</button>
         </div>
         <form class="row" id="addFriendForm">
-          <input type="text" id="friendIn" maxlength="21" placeholder="Ник друга" autocapitalize="off" spellcheck="false" style="flex:1 1 160px">
+          <input type="text" id="friendIn" maxlength="21" placeholder="Найти по нику" autocapitalize="off" spellcheck="false" autocomplete="off" style="flex:1 1 160px">
           <button class="btn ghost" type="submit">Добавить в друзья</button>
         </form>
+        <ul class="flist sug" id="friendSug" hidden></ul>
         <p class="hint" id="friendMsg"></p>
         <ul class="flist" id="reqList"></ul>
         <ul class="flist" id="friendList"></ul>
@@ -355,6 +414,22 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
       </div>
       <div class="screen">
         <video id="vid" playsinline></video>
+        <div class="pctl" id="pctl" hidden>
+          <div class="pclick" id="pClick"></div>
+          <button class="pbig" id="pBig" type="button" aria-label="Смотреть"></button>
+          <div class="pbar">
+            <div class="pseek" id="pSeek"><div class="pload" id="pLoad"></div><div class="pbuf" id="pBuf"></div><div class="pfill" id="pFill"></div><span class="pknob" id="pKnob"></span></div>
+            <div class="prow">
+              <button type="button" id="pPlay" aria-label="Смотреть"></button>
+              <button type="button" class="skip" id="pBack" aria-label="Назад на 10 секунд"><span>10</span></button>
+              <button type="button" class="skip" id="pFwd" aria-label="Вперёд на 10 секунд"><span>10</span></button>
+              <span class="ptime" id="pTime">0:00 / 0:00</span>
+              <span class="pgap"></span>
+              <div class="pvol"><button type="button" id="pMute" aria-label="Звук"></button><input type="range" id="pVol" min="0" max="1" step="0.05" aria-label="Громкость"></div>
+              <button type="button" id="pFull" aria-label="Во весь экран"></button>
+            </div>
+          </div>
+        </div>
         <div class="embed" id="embedBox" hidden></div>
         <div class="empty" id="empty">
           <strong id="emptyTitle">Подключаемся…</strong>
@@ -571,7 +646,7 @@ function handle(m){
       if (upload && upload.gen === m.gen){
         upload.safe = !!m.safe; upload.wait = m.wait;
         if (!(myUp && myUp.gen === m.gen)) upload.loaded = m.loaded; // свой прогресс знаем точнее
-        renderUpload();
+        renderUpload(); pc.render();
       }
       break;
     case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); if (m.st) floatSticker(m.st); break;
@@ -601,7 +676,7 @@ function onRoom(m){
   renderRoomFriends();
   if (prevHost !== hostId && hostId === myId && prevHost && prevHost !== myId) toast('Теперь вы ведущий');
   handleMedia(m.media || null, m.state);
-  renderRole(); renderPeople(); renderQueue(); renderLock();
+  renderRole(); renderPeople(); renderQueue(); renderLock(); pc.render();
 }
 
 /* ---------- фильм с компьютера ----------
@@ -731,6 +806,123 @@ function renderUpload(){
     (myUp ? '. Не закрывайте вкладку. Когда загрузка закончится, фильм откроется у всех.' : '. Фильм откроется, как только загрузка закончится.');
 }
 
+/* ---------- свой плеер: кнопки поверх видео ----------
+   Ведущий управляет (▶, ±10 с, перемотка), остальные видят время и полоску; громкость и полный экран — у каждого свои. */
+const ICO = {
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.86l12.2-7.5a1 1 0 0 0 0-1.72L8.5 3.64A1 1 0 0 0 7 4.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5.5" y="4" width="4.5" height="16" rx="1.2"/><rect x="14" y="4" width="4.5" height="16" rx="1.2"/></svg>',
+  back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 3.5v4h4"/></svg>',
+  fwd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 3.5v4h-4"/></svg>',
+  vol: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M15.5 9a4 4 0 0 1 0 6"/><path d="M18 6.5a7.5 7.5 0 0 1 0 11"/></svg>',
+  mute: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor"/><path d="M16 9.5l5 5M21 9.5l-5 5"/></svg>',
+  full: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>',
+  exit: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>',
+};
+const pc = (() => {
+  const box = $('#pctl'), seek = $('#pSeek'), screen = document.querySelector('.screen');
+  let on = false, idleT = null, drag = false, tip = null;
+  $('#pBack').insertAdjacentHTML('afterbegin', ICO.back); $('#pFwd').insertAdjacentHTML('afterbegin', ICO.fwd);
+  $('#pFull').innerHTML = ICO.full;
+  const host = () => amHost();
+  const anim = (b, cls) => { b.classList.remove(cls); void b.offsetWidth; b.classList.add(cls); };
+  function flash(html){ const f = document.createElement('div'); f.className = 'pflash'; f.innerHTML = html; box.append(f); setTimeout(() => f.remove(), 650); }
+  function wake(){
+    box.classList.remove('idle'); clearTimeout(idleT);
+    idleT = setTimeout(() => { if (!v.paused && !drag) box.classList.add('idle'); }, 2600);
+  }
+  function render(){
+    if (!on) return;
+    const d = v.duration || 0, t = v.currentTime || 0, h = host();
+    const playing = !v.paused && !v.ended;
+    const pIco = playing ? ICO.pause : ICO.play;
+    if ($('#pPlay').dataset.s !== String(playing)){ $('#pPlay').innerHTML = pIco; $('#pPlay').dataset.s = playing; anim($('#pPlay'), 'bump'); }
+    $('#pPlay').setAttribute('aria-label', playing ? 'Пауза' : 'Смотреть');
+    if (!$('#pBig').innerHTML) $('#pBig').innerHTML = ICO.play;
+    $('#pBig').classList.toggle('gone', playing || !h);
+    for (const id of ['#pPlay', '#pBack', '#pFwd']) $(id).hidden = !h;
+    seek.classList.toggle('ro', !h);
+    if (!drag){ $('#pFill').style.width = d ? (t / d * 100) + '%' : 0; $('#pKnob').style.left = d ? (t / d * 100) + '%' : 0; }
+    let be = 0; for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= t + 1) be = Math.max(be, v.buffered.end(i));
+    $('#pBuf').style.width = d ? Math.min(100, be / d * 100) + '%' : 0;
+    const part = media && media.kind === 'file' && media.partial && upload && upload.total;
+    $('#pLoad').style.width = part ? Math.min(100, upload.loaded / upload.total * 100) + '%' : (d ? '100%' : 0);
+    $('#pTime').textContent = fmt(t) + ' / ' + fmt(d);
+    const muted = v.muted || v.volume === 0;
+    const mIco = muted ? ICO.mute : ICO.vol;
+    if ($('#pMute').dataset.s !== String(muted)){ $('#pMute').innerHTML = mIco; $('#pMute').dataset.s = muted; }
+    if (document.activeElement !== $('#pVol')) $('#pVol').value = v.muted ? 0 : v.volume;
+    $('#pFull').innerHTML = document.fullscreenElement ? ICO.exit : ICO.full;
+  }
+  function toggle(){
+    if (!host() || !player) return;
+    if (v.paused || v.ended){ player.play(); flash(ICO.play); } else { player.pause(); flash(ICO.pause); }
+    wake();
+  }
+  function skip(s){
+    if (!host() || !player || !v.duration) return;
+    player.seek(Math.max(0, Math.min(v.duration - 0.5, v.currentTime + s)));
+    anim(s < 0 ? $('#pBack') : $('#pFwd'), s < 0 ? 'spin' : 'spinf');
+    flash('<span>' + (s < 0 ? '−' : '+') + Math.abs(s) + ' с</span>');
+    wake();
+  }
+  const frac = e => { const r = seek.getBoundingClientRect(); return Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); };
+  function showTip(e){
+    if (!v.duration) return;
+    if (!tip){ tip = document.createElement('div'); tip.className = 'ptip'; seek.append(tip); }
+    const f = frac(e); tip.style.left = (f * 100) + '%'; tip.textContent = fmt(f * v.duration);
+  }
+  seek.addEventListener('pointermove', e => { showTip(e); if (drag){ const f = frac(e); $('#pFill').style.width = $('#pKnob').style.left = f * 100 + '%'; } });
+  seek.addEventListener('pointerleave', () => { if (tip && !drag){ tip.remove(); tip = null; } });
+  seek.addEventListener('pointerdown', e => {
+    if (!host() || !v.duration) return;
+    drag = true; seek.classList.add('drag'); seek.setPointerCapture(e.pointerId);
+    const f = frac(e); $('#pFill').style.width = $('#pKnob').style.left = f * 100 + '%';
+  });
+  seek.addEventListener('pointerup', e => {
+    if (!drag) return;
+    drag = false; seek.classList.remove('drag');
+    if (tip){ tip.remove(); tip = null; }
+    if (player && v.duration) player.seek(frac(e) * v.duration);
+    wake();
+  });
+  $('#pBig').addEventListener('click', toggle);
+  $('#pPlay').addEventListener('click', toggle);
+  $('#pBack').addEventListener('click', () => skip(-10));
+  $('#pFwd').addEventListener('click', () => skip(10));
+  $('#pClick').addEventListener('click', () => { if (box.classList.contains('idle')) { wake(); return; } toggle(); });
+  $('#pClick').addEventListener('dblclick', () => full());
+  $('#pMute').addEventListener('click', () => {
+    if (v.muted || v.volume === 0){ v.muted = false; if (!v.volume) v.volume = 0.6; $('#soundbar').hidden = true; } else v.muted = true;
+    anim($('#pMute'), 'bump');
+  });
+  $('#pVol').addEventListener('input', e => { v.volume = +e.target.value; v.muted = v.volume === 0; if (!v.muted) $('#soundbar').hidden = true; });
+  function full(){
+    if (document.fullscreenElement) { document.exitFullscreen().catch(() => {}); return; }
+    if (screen.requestFullscreen) screen.requestFullscreen().catch(() => { try { v.webkitEnterFullscreen(); } catch {} });
+    else try { v.webkitEnterFullscreen(); } catch {} // iPhone: полноэкранный режим только у самого видео
+    anim($('#pFull'), 'bump');
+  }
+  $('#pFull').addEventListener('click', full);
+  document.addEventListener('fullscreenchange', render);
+  screen.addEventListener('pointermove', () => { if (on) wake(); });
+  addEventListener('keydown', e => {
+    if (!on || e.target.closest('input, textarea, [contenteditable]')) return;
+    if (e.code === 'Space' || e.key === 'k'){ if (host()){ e.preventDefault(); toggle(); } }
+    else if (e.key === 'ArrowLeft'){ if (host()){ e.preventDefault(); skip(-10); } }
+    else if (e.key === 'ArrowRight'){ if (host()){ e.preventDefault(); skip(10); } }
+    else if (e.key === 'f' || e.key === 'а'){ full(); }
+    else if (e.key === 'm' || e.key === 'ь'){ $('#pMute').click(); }
+  });
+  for (const ev of ['timeupdate', 'progress', 'durationchange', 'play', 'pause', 'ended', 'volumechange', 'seeked', 'loadedmetadata']) v.addEventListener(ev, render);
+  v.addEventListener('play', wake); v.addEventListener('pause', () => box.classList.remove('idle'));
+  v.addEventListener('volumechange', () => { store.set('divan-vol', String(v.volume)); });
+  { const sv = parseFloat(store.get('divan-vol')); if (sv >= 0 && sv <= 1) v.volume = sv; }
+  return {
+    show(x){ on = x; box.hidden = !x; if (x){ $('#pPlay').dataset.s = ''; render(); wake(); } else if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); },
+    render,
+  };
+})();
+
 /* плеер для фильма с сервера — тот же интерфейс, что у плееров Rutube и VK */
 function filePlayer(m, onEvent){
   const mine = myUp && myUp.gen === m.gen;
@@ -742,7 +934,8 @@ function filePlayer(m, onEvent){
     error: () => { if (v.error) onEvent('error'); },
   };
   for (const k in on) v.addEventListener(k, on[k]);
-  v.srcObject = null; v.src = url; v.controls = true; v.muted = false; v.preload = 'auto';
+  v.srcObject = null; v.src = url; v.controls = false; v.muted = false; v.preload = 'auto';
+  pc.show(true);
   return {
     url,
     play(){ v.play().then(() => { $('#soundbar').hidden = true; }).catch(() => { v.muted = true; v.play().catch(() => {}); $('#soundbar').hidden = false; }); },
@@ -752,7 +945,7 @@ function filePlayer(m, onEvent){
     isPlaying(){ return !v.paused && !v.ended; },
     destroy(){
       for (const k in on) v.removeEventListener(k, on[k]);
-      v.pause(); v.removeAttribute('src'); v.load(); v.controls = false; $('#soundbar').hidden = true;
+      v.pause(); v.removeAttribute('src'); v.load(); v.controls = false; $('#soundbar').hidden = true; pc.show(false);
       if (url.startsWith('blob:') && !(myUp && myUp.url === url && !myUp.done)) { URL.revokeObjectURL(url); if (myUp && myUp.url === url) myUp.url = null; }
     },
   };
@@ -1314,11 +1507,20 @@ function applyUser(u){
   if (u.color) { myColor = u.color; store.set('divan-color', u.color); }
   renderMe(); renderAcct();
 }
+let knownReqs = null;
 async function loadMe(){
   if (!token()) return;
   try {
     const j = await api('/api/me');
     myUser = j.user; friends = j.friends || []; requests = j.requests || []; sent = j.sent || [];
+    // новая заявка в друзья — сообщаем, даже если человек сейчас в комнате
+    const fresh = knownReqs ? requests.filter(r => !knownReqs.has(r.login)) : [];
+    knownReqs = new Set(requests.map(r => r.login));
+    for (const r of fresh){
+      const t = r.name + ' (@' + r.login + ') хочет в друзья';
+      if (myId) toast(t + ' — принять можно на главной или в списке «В зале»', 5000);
+      try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Общий диван', { body: t, icon: '/icons/icon-192.png' }); } catch {}
+    }
     if (!myId) applyUser(j.user);
     renderAcct(); renderRoomFriends(); if (myId) renderPeople();
   } catch {}
@@ -1344,6 +1546,31 @@ async function friendAction(kind, login, msgEl){
     return true;
   } catch (err) { if (msgEl) msgEl.textContent = err.message; else if (myId) toast(err.message, 3000); return false; }
 }
+let sugTimer = null, sugSeq = 0;
+$('#friendIn').addEventListener('input', () => {
+  clearTimeout(sugTimer);
+  const q = $('#friendIn').value.trim().replace(/^@/, '').toLowerCase();
+  if (q.length < 2){ $('#friendSug').hidden = true; return; }
+  sugTimer = setTimeout(async () => {
+    const my = ++sugSeq;
+    let users = [];
+    try { users = (await api('/api/friends/search?q=' + encodeURIComponent(q))).users || []; } catch { return; }
+    if (my !== sugSeq) return;
+    const ul = $('#friendSug'); ul.replaceChildren();
+    if (!users.length){ ul.append(el('li', 'hint', 'Никого с ником на «' + q + '» не нашлось')); ul.hidden = false; return; }
+    for (const u of users){
+      const li = el('li'); const w = el('span', 'who'); w.append(el('b', null, u.name), ' ', el('span', 'muted', '@' + u.login));
+      li.append(avaOf(u), w);
+      if (u.rel === 'friend') li.append(el('span', 'chip ok', 'друг'));
+      else if (u.rel === 'sent') li.append(el('span', 'chip', 'заявка отправлена'));
+      else li.append(btn(u.rel === 'incoming' ? 'Принять' : 'Добавить', 'btn small', async () => {
+        if (await friendAction(u.rel === 'incoming' ? 'accept' : 'add', u.login, $('#friendMsg'))){ $('#friendIn').value = ''; ul.hidden = true; }
+      }));
+      ul.append(li);
+    }
+    ul.hidden = false;
+  }, 250);
+});
 $('#addFriendForm').addEventListener('submit', async e => {
   e.preventDefault();
   const l = $('#friendIn').value.trim().replace(/^@/, '').toLowerCase();
@@ -1355,7 +1582,9 @@ $('#addFriendForm').addEventListener('submit', async e => {
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
 const avaOf = u => { const a = el('span', 'ava'); paintAva(a, u.emoji, u.color, u.name, u.ava); return a; };
 const btn = (text, cls, fn) => { const b = el('button', cls, text); b.type = 'button'; b.addEventListener('click', fn); return b; };
-function statusText(f){ return !f.online ? 'не в сети' : f.room ? (f.room === roomCode ? 'здесь' : 'в комнате' + (f.locked ? ' 🔒' : '')) : 'в сети'; }
+function statusText(f){ return !f.online ? 'не в сети' : f.room ? (f.room === roomCode ? 'здесь' : (f.watching ? 'смотрит' : 'в комнате') + (f.locked ? ' 🔒' : '')) : 'в сети'; }
+// что смотрит друг — отдельной строкой под именем
+function watchLine(f){ return f.online && f.room && f.watching ? el('span', 'watch', '▶ ' + f.watching) : null; }
 
 function renderAcct(){
   myAva = myUser ? myUser.ava || null : null;
@@ -1368,6 +1597,8 @@ function renderAcct(){
   if (!myUser) return;
   paintAva($('#acctAva'), myUser.emoji, myUser.color, myUser.name, myUser.ava);
   $('#acctName').textContent = myUser.name; $('#acctLogin').textContent = '@' + myUser.login;
+  { const old = document.querySelector('#acctIn .reqbadge'); if (old) old.remove();
+    if (requests.length){ const b = el('span', 'reqbadge', String(requests.length)); b.title = 'Заявки в друзья'; $('#acctName').after(b); } }
   const rl = $('#reqList'); rl.replaceChildren();
   for (const r of requests){
     const li = el('li'); const w = el('span', 'who'); w.append(el('b', null, r.name), ' хочет в друзья');
@@ -1387,8 +1618,9 @@ function renderAcct(){
     const li = el('li');
     const d = el('span', 'fdot' + (f.online ? (f.room ? ' room' : ' on') : '')); d.title = statusText(f);
     const w = el('span', 'who'); w.append(el('b', null, f.name), ' ', el('span', 'muted', '@' + f.login + ' · ' + statusText(f)));
+    const wl = watchLine(f); if (wl) w.append(wl);
     li.append(avaOf(f), d, w);
-    if (f.online && f.room) li.append(btn('Зайти', 'btn small', () => { location.href = '/r/' + f.room; }));
+    if (f.online && f.room) li.append(btn(f.watching ? 'Смотреть с ним' : 'Зайти', 'btn small', () => { location.href = '/r/' + f.room; }));
     const del = btn('×', 'mini', () => {
       if (del.dataset.sure){ friendAction('remove', f.login); return; }
       del.dataset.sure = 1; del.textContent = 'удалить?'; setTimeout(() => { delete del.dataset.sure; del.textContent = '×'; }, 3000);
@@ -1406,9 +1638,13 @@ function renderRoomFriends(){
   const on = friends.filter(f => f.online);
   for (const f of on){
     const li = el('li');
-    li.append(avaOf(f), el('span', 'who', f.name));
+    const w = el('span', 'who', f.name); const wl = f.room !== roomCode ? watchLine(f) : null; if (wl) w.append(wl);
+    li.append(avaOf(f), w);
     if (here.has(f.login) || f.room === roomCode) li.append(el('span', 'chip ok', 'здесь'));
-    else li.append(btn(media ? 'Позвать смотреть' : 'Позвать', 'btn ghost small', e => { out({ t:'invite', to:f.login }); e.target.textContent = 'Позвали ✓'; e.target.disabled = true; }));
+    else {
+      if (f.room && !f.locked) li.append(btn('Зайти', 'btn ghost small', () => { location.href = '/r/' + f.room; }));
+      li.append(btn(media ? 'Позвать смотреть' : 'Позвать', 'btn ghost small', e => { out({ t:'invite', to:f.login }); e.target.textContent = 'Позвали ✓'; e.target.disabled = true; }));
+    }
     ul.append(li);
   }
   const off = friends.length - on.length;
@@ -1432,7 +1668,7 @@ function acctHandle(m){
     case 'presence': {
       const f = friends.find(x => x.login === m.login);
       if (!f) { loadMe(); break; }
-      Object.assign(f, { online: m.online, room: m.room, locked: m.locked });
+      Object.assign(f, { online: m.online, room: m.room, locked: m.locked, watching: m.watching || null });
       renderAcct(); renderRoomFriends();
       break;
     }
