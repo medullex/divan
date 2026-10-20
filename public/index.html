@@ -89,9 +89,16 @@ input[type=text]{min-width:0;background:var(--bg);color:var(--fg);border:1px sol
   background:linear-gradient(160deg,var(--c),color-mix(in srgb,var(--c) 50%,#000));transform:rotate(-3deg);box-shadow:0 4px 0 rgba(0,0,0,.35),0 0 0 2px rgba(255,255,255,.12) inset}
 .stk:nth-of-type(even){transform:rotate(2deg)}
 .stk .se{font-size:38px;line-height:1.05;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
-.stk .st{font:700 10.5px/1.15 var(--display);color:#fff;text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5);overflow-wrap:anywhere}
+.stk .st{font:700 10.5px/1.15 var(--display);color:#fff;text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5);overflow-wrap:normal;word-break:normal;hyphens:manual}
 .stickers .stk{min-width:0;width:100%;max-width:none}
 .stickers .stk .se{font-size:30px}
+.stickers .stk .st{font-size:9.5px}
+/* телефон: панели — во всю ширину экрана, а не от кнопки */
+@media (max-width:520px){
+  .pop{left:8px!important;right:8px!important;max-width:none}
+  .stickers{width:auto;max-height:min(300px,45vh)}
+  .emojis{grid-template-columns:repeat(8,1fr)}.emojis button{width:auto}
+}
 .msg.sticker{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
 .floater.stkf{font-size:inherit;bottom:18%;animation-duration:3.4s}
 .floater.stkf .stk{transform:scale(1.15) rotate(-4deg)}
@@ -1396,9 +1403,10 @@ let openPop = null;
 function showPop(pop, anchor){
   if (openPop === pop){ closePop(); return; }
   closePop(); pop.hidden = false; openPop = pop;
-  const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
-  let x = Math.min(Math.max(12, r.right - w), innerWidth - w - 12);
-  let y = r.bottom + 8; if (y + h > innerHeight - 12) y = Math.max(12, r.top - h - 8);
+  const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight; // видимая ширина (на iPhone innerWidth бывает больше экрана)
+  const r = anchor.getBoundingClientRect(), w = Math.min(pop.offsetWidth, vw - 16), h = pop.offsetHeight;
+  let x = Math.max(8, Math.min(r.right - w, vw - w - 8));
+  let y = r.bottom + 8; if (y + h > vh - 8) y = Math.max(8, r.top - h - 8);
   pop.style.left = x + 'px'; pop.style.top = y + 'px';
 }
 function closePop(){ if (openPop){ openPop.hidden = true; openPop = null; } }
