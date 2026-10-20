@@ -89,6 +89,7 @@ async function userByToken(token) {
 const online = new Map();
 const friendCache = new Map(); // login -> Set<login> (только для тех, кто онлайн)
 let roomLocked = () => false;  // сервер подставит функцию «комната с паролем?»
+let roomWhat = () => null;     // …и «что сейчас смотрят в комнате»
 
 function sendWs(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
 function toUser(login, msg) { for (const ws of online.get(login) || []) sendWs(ws, msg); }
@@ -97,7 +98,7 @@ function presenceOf(login) {
   if (!set || !set.size) return { online: false, room: null };
   let room = null;
   for (const ws of set) if (ws.roomCode) { room = ws.roomCode; break; }
-  return { online: true, room, locked: room ? roomLocked(room) : false };
+  return { online: true, room, locked: room ? roomLocked(room) : false, watching: room ? roomWhat(room) : null };
 }
 function notifyFriends(login) {
   const fr = friendCache.get(login);
@@ -236,6 +237,25 @@ async function handle(req, res, pathname) {
       return send(res, 200, { user: nu }), true;
     }
 
+    if (pathname === '/api/friends/search' && req.method === 'GET') { // поиск людей по началу ника
+      if (limited(req, 300)) return send(res, 429, { error: 'Слишком часто. Подождите немного.' }), true;
+      const q = normLogin(new URL(req.url, 'http://x').searchParams.get('q') || '').replace(/[^a-z0-9_]/g, '').slice(0, 20);
+      if (q.length < 2) return send(res, 200, { users: [] }), true;
+      const found = [];
+      let cur = '0';
+      for (let i = 0; i < 12 && found.length < 8; i++) {
+        const r = await db('SCAN', cur, 'MATCH', 'user:' + q + '*', 'COUNT', 500);
+        cur = String(r[0]);
+        for (const k of r[1] || []) { const l = k.slice(5); if (validLogin(l) && l !== L && !found.includes(l)) found.push(l); }
+        if (cur === '0') break;
+      }
+      found.sort((a, b) => (a === q ? -1 : b === q ? 1 : a.length - b.length || a.localeCompare(b)));
+      const top = found.slice(0, 8);
+      if (!top.length) return send(res, 200, { users: [] }), true;
+      const [users, rel] = await Promise.all([getUsers(top), dbMany(top.flatMap(o => [['SISMEMBER', 'friends:' + L, o], ['SISMEMBER', 'sent:' + L, o], ['SISMEMBER', 'req:' + L, o]]))]);
+      return send(res, 200, { users: users.map((u, i) => ({ ...u, rel: rel[i * 3] ? 'friend' : rel[i * 3 + 1] ? 'sent' : rel[i * 3 + 2] ? 'incoming' : null })) }), true;
+    }
+
     if (req.method !== 'POST') return send(res, 405, { error: 'POST' }), true;
     const b = await readBody(req);
     const other = normLogin(b.login);
@@ -290,4 +310,5 @@ async function accept(L, other, res) {
 module.exports = {
   enabled, handle, attach, detach, notifyFriends, presenceOf, isFriend, toUser, userByToken,
   setRoomLocked: fn => { roomLocked = fn; },
+  setRoomWhat: fn => { roomWhat = fn; },
 };
