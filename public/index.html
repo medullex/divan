@@ -149,6 +149,18 @@ input[type=text]{min-width:0;background:var(--bg);color:var(--fg);border:1px sol
 @keyframes flash{0%{opacity:0;transform:scale(.6)}25%{opacity:1}100%{opacity:0;transform:scale(1.4)}}
 .screen:fullscreen{border-radius:0;aspect-ratio:auto}
 .screen .floaters{z-index:3}.screen .bottombar{z-index:4}.screen .toast{z-index:5}
+/* сообщения чата поверх видео — только в полноэкранном режиме */
+.fsn{position:absolute;top:14px;right:14px;z-index:6;display:flex;flex-direction:column;align-items:flex-end;gap:8px;pointer-events:none;max-width:min(380px,60%)}
+.screen:not(:fullscreen) .fsn{display:none}
+.fsn .m{background:rgba(16,12,14,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.12);border-left:3px solid var(--c,var(--lamp));
+  border-radius:10px;padding:7px 12px;font-size:15px;line-height:1.35;color:#fff;box-shadow:0 6px 24px rgba(0,0,0,.4);overflow-wrap:anywhere;
+  animation:fsin .3s cubic-bezier(.2,1.2,.4,1);transition:opacity .45s,transform .45s}
+.fsn .m b{color:var(--c,var(--lamp));font-weight:600;margin-right:6px}
+.fsn .m.out{opacity:0;transform:translateX(24px)}
+.fsn .m.ms{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-bottom:10px}
+.fsn .stk{transform:rotate(-3deg);min-width:76px;padding:6px 8px}.fsn .stk .se{font-size:30px}
+@keyframes fsin{from{opacity:0;transform:translateX(40px) scale(.95)}to{opacity:1;transform:none}}
+.fsbtn{font-size:16px}
 @media (max-width:560px){.pvol input{display:none}.ptime{font-size:11px;padding:0 4px}.prow button{width:34px;height:34px}}
 @media (prefers-reduced-motion:reduce){.pbig,.prow button,.pctl,.pbar,.pknob{transition:none}.pflash,.prow .bump,.prow .skip svg{animation:none!important}}
 
@@ -440,6 +452,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
           <button class="btn ghost" id="retryBtn" type="button" hidden>Переподключиться</button>
         </div>
         <div class="floaters" id="floaters"></div>
+        <div class="fsn" id="fsn" aria-live="polite"></div>
         <div class="toast" id="toast" style="opacity:0"></div>
         <div class="bottombar" id="soundbar" hidden><button class="btn" id="soundBtn" type="button">Включить звук</button></div>
         <div class="bottombar" id="joinbar" hidden><button class="btn" id="joinBtn" type="button">Смотреть вместе</button></div>
@@ -449,6 +462,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
       <div class="bar">
         <span class="file" id="fname"></span>
         <div class="reacts" id="reacts">
+          <button type="button" class="fsbtn" id="fsBtn" aria-label="Во весь экран" title="Во весь экран (F)">⛶</button>
           <button type="button" data-e="😂" aria-label="Смешно">😂</button>
           <button type="button" data-e="😮" aria-label="Ого">😮</button>
           <button type="button" data-e="😭" aria-label="Грустно">😭</button>
@@ -649,7 +663,7 @@ function handle(m){
         renderUpload(); pc.render();
       }
       break;
-    case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); if (m.st) floatSticker(m.st); break;
+    case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); if (m.st) floatSticker(m.st); fsNote(m); break;
     case 'react': floatEmoji(m.e); break;
     case 'error': if (myId) toast(m.text, 4000); else setConn(false, m.text); break;
     case 'replaced':
@@ -910,7 +924,7 @@ const pc = (() => {
     if (e.code === 'Space' || e.key === 'k'){ if (host()){ e.preventDefault(); toggle(); } }
     else if (e.key === 'ArrowLeft'){ if (host()){ e.preventDefault(); skip(-10); } }
     else if (e.key === 'ArrowRight'){ if (host()){ e.preventDefault(); skip(10); } }
-    else if (e.key === 'f' || e.key === 'а'){ full(); }
+    else if (e.key === 'f' || e.key === 'а'){ full(); }  // (для Rutube/VK — кнопка ⛶ под видео)
     else if (e.key === 'm' || e.key === 'ь'){ $('#pMute').click(); }
   });
   for (const ev of ['timeupdate', 'progress', 'durationchange', 'play', 'pause', 'ended', 'volumechange', 'seeked', 'loadedmetadata']) v.addEventListener(ev, render);
@@ -918,6 +932,7 @@ const pc = (() => {
   v.addEventListener('volumechange', () => { store.set('divan-vol', String(v.volume)); });
   { const sv = parseFloat(store.get('divan-vol')); if (sv >= 0 && sv <= 1) v.volume = sv; }
   return {
+    full,
     show(x){ on = x; box.hidden = !x; if (x){ $('#pPlay').dataset.s = ''; render(); wake(); } else if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); },
     render,
   };
@@ -1352,6 +1367,25 @@ function floatSticker(id){
   el.style.left = (8 + Math.random()*66) + '%'; $('#floaters').appendChild(el);
   setTimeout(() => el.remove(), 3500);
 }
+// новое сообщение, пока смотрим во весь экран: всплывает справа сверху на 3 секунды
+function fsNote(m){
+  const scr = document.querySelector('.screen');
+  if (document.fullscreenElement !== scr || m.by === myId) return;
+  const box = $('#fsn'), d = document.createElement('div'); d.className = 'm'; d.style.setProperty('--c', m.color || 'var(--lamp)');
+  const b = document.createElement('b'); b.textContent = m.name; d.append(b);
+  if (m.st){ const st = stickerEl(m.st); if (st){ d.classList.add('ms'); d.append(st); } }
+  else d.append(m.text.length > 140 ? m.text.slice(0, 140) + '…' : m.text);
+  box.append(d);
+  while (box.children.length > 3) box.firstElementChild.remove();
+  setTimeout(() => { d.classList.add('out'); setTimeout(() => d.remove(), 500); }, 3000);
+}
+$('#fsBtn').addEventListener('click', () => {
+  const scr = document.querySelector('.screen');
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  else if (media && media.kind === 'file') pc.full();
+  else if (scr.requestFullscreen) scr.requestFullscreen().catch(() => toast('Браузер не дал развернуть видео', 3000));
+  else toast('На этом устройстве разверните видео кнопкой в самом плеере', 4000);
+});
 function sendReact(e){ if (ws && ws.readyState === 1) out({ t:'react', e }); else floatEmoji(e); }
 $('#reacts').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b || !b.dataset.e) return;
