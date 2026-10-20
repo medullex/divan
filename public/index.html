@@ -15,6 +15,7 @@
 <meta name="apple-mobile-web-app-title" content="Диван">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700&family=Golos+Text:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<script>try{var t=localStorage.getItem('divan-theme');if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
 /* Тёмный кинозал: экран слева, узкая панель (зрители + чат) справа; на телефоне всё в одну колонку. */
 :root{
@@ -27,7 +28,7 @@
 }
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 var(--body);
+body{margin:0;background-color:var(--bg);background-image:var(--bgimg,none);background-attachment:fixed;color:var(--fg);font:15px/1.5 var(--body);
   padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 [hidden]{display:none!important}
 .wrap{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:14px;
@@ -46,6 +47,57 @@ h1 span{color:var(--lamp)}
 .btn.small{padding:4px 10px;font-size:12px}
 button:focus-visible,input:focus-visible,label:focus-visible{outline:2px solid var(--lamp);outline-offset:2px}
 input[type=text]{min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:10px 14px;font:15px var(--body)}
+
+/* фоны (темы оформления) — у каждого свой, хранится в браузере */
+:root[data-theme="cinema"]{--bg:#12080a;--seat:#1f0f13;--line:#40202a;--lamp:#e5484d;--lamp-ink:#fff;--muted:#b39297;
+  --bgimg:radial-gradient(ellipse at 50% -10%,#5a121c 0,transparent 55%),repeating-linear-gradient(90deg,rgba(0,0,0,.18) 0 18px,transparent 18px 36px)}
+:root[data-theme="night"]{--bg:#0a0e18;--seat:#121a2a;--line:#253049;--lamp:#7aa2ff;--lamp-ink:#0a1020;--muted:#93a0bb;
+  --bgimg:radial-gradient(circle at 85% 8%,rgba(122,162,255,.18) 0,transparent 30%),radial-gradient(circle at 10% 90%,rgba(80,60,180,.15) 0,transparent 40%)}
+:root[data-theme="forest"]{--bg:#0b120e;--seat:#132019;--line:#25392c;--lamp:#8fd17a;--lamp-ink:#0d1a0f;--muted:#97ab9c;
+  --bgimg:radial-gradient(ellipse at 20% 0,rgba(143,209,122,.14) 0,transparent 50%),radial-gradient(ellipse at 90% 100%,rgba(40,90,60,.25) 0,transparent 50%)}
+:root[data-theme="neon"]{--bg:#0c0916;--seat:#171129;--line:#33255a;--lamp:#ff4fd8;--lamp-ink:#1a0518;--muted:#a99cc7;
+  --bgimg:radial-gradient(circle at 0 0,rgba(255,79,216,.22) 0,transparent 35%),radial-gradient(circle at 100% 100%,rgba(0,220,255,.18) 0,transparent 40%)}
+:root[data-theme="sunset"]{--bg:#170d12;--seat:#24131b;--line:#45253a;--lamp:#ff8a5c;--lamp-ink:#2a0e04;--muted:#bb9aa5;
+  --bgimg:linear-gradient(180deg,rgba(255,138,92,.22) 0,rgba(160,60,140,.14) 35%,transparent 70%)}
+:root[data-theme="ocean"]{--bg:#07131a;--seat:#0e1f29;--line:#1d3a4a;--lamp:#3fd0c9;--lamp-ink:#03201f;--muted:#8fb0ba;
+  --bgimg:radial-gradient(ellipse at 50% 120%,rgba(63,208,201,.2) 0,transparent 60%),radial-gradient(ellipse at 0 0,rgba(30,90,160,.2) 0,transparent 45%)}
+:root[data-theme="space"]{--bg:#06060c;--seat:#11111d;--line:#262640;--lamp:#c9a0ff;--lamp-ink:#160a2a;--muted:#9d9ab8;
+  --bgimg:radial-gradient(1px 1px at 20% 30%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 70% 15%,#fff 50%,transparent 51%),radial-gradient(1.5px 1.5px at 40% 80%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 85% 60%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 10% 70%,#ccd 50%,transparent 51%),radial-gradient(1.5px 1.5px at 60% 45%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 92% 88%,#fff 50%,transparent 51%),radial-gradient(1px 1px at 30% 5%,#dde 50%,transparent 51%),radial-gradient(ellipse at 70% 30%,rgba(120,80,220,.2) 0,transparent 50%)}
+:root[data-theme="retro"]{--bg:#1a150f;--seat:#251e15;--line:#463926;--lamp:#f2c14e;--lamp-ink:#2a1e04;--muted:#b8a78a;
+  --bgimg:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 2px,transparent 2px 4px),radial-gradient(ellipse at 50% 0,rgba(242,193,78,.15) 0,transparent 55%)}
+:root[data-theme="candy"]{--bg:#160e17;--seat:#241626;--line:#46294a;--lamp:#ff9ec7;--lamp-ink:#2a0a18;--muted:#c0a3bf;
+  --bgimg:radial-gradient(circle at 15% 20%,rgba(255,158,199,.16) 0,transparent 30%),radial-gradient(circle at 80% 70%,rgba(158,220,255,.14) 0,transparent 35%)}
+.themebtn{background:var(--seat);border:1px solid var(--line);color:var(--fg);border-radius:999px;padding:5px 12px;font:500 13px var(--body);cursor:pointer}
+.themebtn:hover{border-color:var(--lamp)}
+.hdr-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+/* всплывающие панели: фоны, реакции, стикеры */
+.pop{position:fixed;z-index:60;background:var(--seat);border:1px solid var(--lamp);border-radius:10px;padding:10px;box-shadow:0 12px 40px rgba(0,0,0,.55);max-width:calc(100vw - 24px)}
+.pop .label{margin-bottom:6px}
+.themes{display:grid;grid-template-columns:repeat(5,52px);gap:8px}
+.themes button{width:52px;height:52px;border-radius:10px;border:2px solid transparent;cursor:pointer;padding:0;position:relative;overflow:hidden}
+.themes button[aria-pressed="true"]{border-color:var(--fg)}
+.themes button span{position:absolute;inset:auto 0 0 0;font:600 9px var(--body);color:#fff;background:rgba(0,0,0,.45);padding:1px 0;text-align:center}
+.emojis{display:grid;grid-template-columns:repeat(8,38px);gap:4px}
+.emojis button{font-size:22px;width:38px;height:38px;border-radius:8px;border:0;background:transparent;cursor:pointer;padding:0;line-height:1}
+.emojis button:hover{background:color-mix(in srgb,var(--lamp) 18%,transparent)}
+@media (max-width:400px){.emojis{grid-template-columns:repeat(6,38px)}.themes{grid-template-columns:repeat(4,52px)}}
+.stickers{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;max-height:min(360px,60vh);overflow-y:auto;width:min(380px,calc(100vw - 44px));padding:4px}
+.stickers button{background:none;border:0;padding:4px;cursor:pointer;border-radius:10px}
+.stickers button:hover{background:color-mix(in srgb,var(--lamp) 14%,transparent)}
+/* стикер — карточка с большим эмодзи и подписью */
+.stk{--c:#f5a742;display:inline-flex;flex-direction:column;align-items:center;gap:3px;padding:8px 10px 7px;border-radius:16px;min-width:84px;max-width:120px;
+  background:linear-gradient(160deg,var(--c),color-mix(in srgb,var(--c) 50%,#000));transform:rotate(-3deg);box-shadow:0 4px 0 rgba(0,0,0,.35),0 0 0 2px rgba(255,255,255,.12) inset}
+.stk:nth-of-type(even){transform:rotate(2deg)}
+.stk .se{font-size:38px;line-height:1.05;filter:drop-shadow(0 2px 2px rgba(0,0,0,.35))}
+.stk .st{font:700 10.5px/1.15 var(--display);color:#fff;text-align:center;text-shadow:0 1px 2px rgba(0,0,0,.5);overflow-wrap:anywhere}
+.stickers .stk{min-width:0;width:100%;max-width:none}
+.stickers .stk .se{font-size:30px}
+.msg.sticker{display:flex;flex-direction:column;align-items:flex-start;gap:4px}
+.floater.stkf{font-size:inherit;bottom:18%;animation-duration:3.4s}
+.floater.stkf .stk{transform:scale(1.15) rotate(-4deg)}
+.chatform .ico{background:none;border:1px solid var(--line);color:var(--fg);border-radius:999px;width:40px;flex:none;font-size:18px;cursor:pointer;padding:0}
+.chatform .ico:hover{border-color:var(--lamp)}
+.reacts .more{font-size:18px;color:var(--muted)}
 
 /* лобби */
 .lobby{max-width:520px;margin:6vh auto 0;display:flex;flex-direction:column;gap:22px}
@@ -194,7 +246,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 
 <!-- ЛОББИ -->
 <div class="wrap" id="lobby">
-  <header><h1><a href="/" class="home" title="На главную">Общий <span>диван</span></a></h1></header>
+  <header><h1><a href="/" class="home" title="На главную">Общий <span>диван</span></a></h1><button class="themebtn" type="button" data-theme-btn>🎨 Фон</button></header>
   <section class="lobby">
     <h2>Смотрите кино вместе, <span>где бы вы ни были</span></h2>
     <p>Создайте комнату и отправьте ссылку друзьям. Найдите фильм на Rutube или вставьте ссылку на VK Видео — он откроется у всех, с общей паузой и перемоткой.</p>
@@ -274,7 +326,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 <div class="wrap" id="hall" hidden>
   <header>
     <h1><a href="/" class="home" title="На главную">Общий <span>диван</span></a></h1>
-    <div class="status"><span class="dot" id="dot"></span><span id="conn">подключение…</span></div>
+    <div class="hdr-right"><button class="themebtn" type="button" data-theme-btn>🎨 Фон</button><div class="status"><span class="dot" id="dot"></span><span id="conn">подключение…</span></div></div>
   </header>
 
   <section class="gate" id="gate" hidden>
@@ -327,6 +379,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
           <button type="button" data-e="😭" aria-label="Грустно">😭</button>
           <button type="button" data-e="❤️" aria-label="Нравится">❤️</button>
           <button type="button" data-e="🔥" aria-label="Огонь">🔥</button>
+          <button type="button" class="more" id="moreReacts" aria-label="Другие реакции" title="Другие реакции">＋</button>
         </div>
       </div>
 
@@ -340,6 +393,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
           <button class="btn ghost" type="button" id="passOff" hidden>Убрать пароль</button>
         </form>
       </div>
+      <p class="note" id="upNote" hidden></p>
       <p class="note" id="roleNote"></p>
     </section>
 
@@ -359,12 +413,17 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
       </div>
       <div class="chat" id="chat" aria-live="polite"></div>
       <form class="chatform" id="chatform">
+        <button class="ico" type="button" id="stkBtn" aria-label="Стикеры" title="Стикеры">🙂</button>
         <input type="text" id="chatin" maxlength="400" placeholder="Сообщение" autocomplete="off">
         <button class="btn" type="submit">Отправить</button>
       </form>
     </aside>
   </main>
 </div>
+
+<div class="pop" id="themePop" hidden><p class="label">Фон</p><div class="themes" id="themes"></div></div>
+<div class="pop" id="reactPop" hidden><p class="label">Реакции</p><div class="emojis" id="emojis"></div></div>
+<div class="pop" id="stkPop" hidden><p class="label">Стикеры</p><div class="stickers" id="stickers"></div></div>
 
 <div class="invite-pop" id="invitePop" hidden role="alert">
   <span class="ava" id="invAva"></span>
@@ -508,8 +567,14 @@ function handle(m){
     case 'sync': onSync(m); break;
     case 'uptoken': sendFile(m.token, m.gen); break;
     case 'upfail': upFailed(m.text); break;
-    case 'upprog': if (upload && upload.gen === m.gen && !(myUp && myUp.gen === m.gen)) { upload.loaded = m.loaded; renderUpload(); } break;
-    case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); break;
+    case 'upprog':
+      if (upload && upload.gen === m.gen){
+        upload.safe = !!m.safe; upload.wait = m.wait;
+        if (!(myUp && myUp.gen === m.gen)) upload.loaded = m.loaded; // свой прогресс знаем точнее
+        renderUpload();
+      }
+      break;
+    case 'chat': chat.push(m); if (chat.length > 120) chat.shift(); renderChat(); if (m.st) floatSticker(m.st); break;
     case 'react': floatEmoji(m.e); break;
     case 'error': if (myId) toast(m.text, 4000); else setConn(false, m.text); break;
     case 'replaced':
@@ -545,15 +610,74 @@ function onRoom(m){
    Файл живёт на сервере, пока загрузивший в комнате. */
 const fmtMB = b => b >= 1073741824 ? (b / 1073741824).toFixed(1).replace('.', ',') + ' ГБ' : Math.round(b / 1048576) + ' МБ';
 const OK_EXT = /\.(mp4|m4v|mov|webm)$/i;
-$('#pick').addEventListener('change', e => {
+$('#pick').addEventListener('change', async e => {
   const f = e.target.files[0]; e.target.value = ''; if (!f || !amHost()) return;
   if (!OK_EXT.test(f.name) && !confirm('Файл «' + f.name + '» может не открыться на iPhone и в некоторых браузерах — надёжнее всего MP4 (H.264). Всё равно загрузить?')) return;
   dropMyUpload();
-  myUp = { gen: 0, file: f, xhr: null, url: null, done: false };
+  const up = myUp = { gen: 0, file: f, body: null, xhr: null, url: null, done: false };
   upload = { gen: -1, name: f.name, total: f.size, loaded: 0 };
   renderUpload(); renderRole();
-  out({ t:'upreq', name: f.name, size: f.size });
+  // узнаём длительность и готовим файл, чтобы его можно было смотреть, пока он загружается
+  const [dur, prep] = await Promise.all([probeDuration(f), prepareBody(f).catch(() => ({ body: f, early: false }))]);
+  if (myUp !== up) return;
+  up.body = prep.body && prep.body.size === f.size ? prep.body : f;
+  out({ t:'upreq', name: f.name, size: f.size, dur, early: !!(prep.early && dur > 0 && up.body) });
 });
+function probeDuration(file){
+  return new Promise(ok => {
+    const el = document.createElement('video'), url = URL.createObjectURL(file);
+    let done = false;
+    const fin = d => { if (done) return; done = true; URL.revokeObjectURL(url); el.removeAttribute('src'); ok(Number.isFinite(d) && d > 0 ? d : 0); };
+    el.preload = 'metadata'; el.muted = true;
+    el.onloadedmetadata = () => fin(el.duration); el.onerror = () => fin(0);
+    setTimeout(() => fin(0), 8000);
+    el.src = url;
+  });
+}
+/* Во многих MP4 «оглавление» (moov) лежит в конце файла — тогда смотреть можно только после полной загрузки.
+   Переставляем его в начало (как делает qt-faststart): данные фильма не меняются, сдвигаются только ссылки на них. */
+async function prepareBody(file){
+  if (!/\.(mp4|m4v|mov)$/i.test(file.name)) return { body: file, early: /\.(webm|mkv)$/i.test(file.name) };
+  const boxes = [];
+  for (let off = 0; off < file.size && boxes.length < 2000;){
+    const dv = new DataView(await file.slice(off, off + 16).arrayBuffer());
+    if (dv.byteLength < 8) return { body: file, early: false };
+    let size = dv.getUint32(0), hdr = 8;
+    const type = String.fromCharCode(dv.getUint8(4), dv.getUint8(5), dv.getUint8(6), dv.getUint8(7));
+    if (size === 1){ if (dv.byteLength < 16) return { body: file, early: false }; size = Number(dv.getBigUint64(8)); hdr = 16; }
+    else if (size === 0) size = file.size - off;
+    if (size < hdr || off + size > file.size) return { body: file, early: false };
+    boxes.push({ off, size, type, hdr }); off += size;
+  }
+  if (boxes.some(b => b.type === 'moof')) return { body: file, early: true }; // «нарезанный» MP4 и так играет по мере загрузки
+  const mi = boxes.findIndex(b => b.type === 'moov'), di = boxes.findIndex(b => b.type === 'mdat');
+  if (mi < 0 || di < 0) return { body: file, early: false };
+  if (mi < di) return { body: file, early: true };                               // оглавление уже в начале
+  const moov = boxes[mi];
+  if (moov.size > 100 * 1048576) return { body: file, early: false };
+  const buf = new Uint8Array(await file.slice(moov.off, moov.off + moov.size).arrayBuffer());
+  const dv = new DataView(buf.buffer), insert = boxes[di].off, shift = moov.size;
+  const CONT = new Set(['moov', 'trak', 'mdia', 'minf', 'stbl']);
+  const walk = (start, end) => {
+    for (let pos = start; pos + 8 <= end;){
+      let size = dv.getUint32(pos), hdr = 8;
+      const type = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
+      if (size === 1){ size = Number(dv.getBigUint64(pos + 8)); hdr = 16; } else if (size === 0) size = end - pos;
+      if (size < hdr || pos + size > end) throw new Error('bad box');
+      if (CONT.has(type)) walk(pos + hdr, pos + size);
+      else if (type === 'stco'){
+        const n = dv.getUint32(pos + hdr + 4);
+        for (let i = 0; i < n; i++){ const o = pos + hdr + 8 + i * 4, val = dv.getUint32(o); if (val >= insert){ if (val + shift > 0xffffffff) throw new Error('overflow'); dv.setUint32(o, val + shift); } }
+      } else if (type === 'co64'){
+        const n = dv.getUint32(pos + hdr + 4);
+        for (let i = 0; i < n; i++){ const o = pos + hdr + 8 + i * 8, val = dv.getBigUint64(o); if (val >= BigInt(insert)) dv.setBigUint64(o, val + BigInt(shift)); }
+      }
+      pos += size;
+    }
+  };
+  walk(moov.hdr, moov.size);
+  return { body: new Blob([file.slice(0, insert), buf, file.slice(insert, moov.off), file.slice(moov.off + moov.size)]), early: true };
+}
 function sendFile(token, gen){
   if (!myUp || myUp.xhr) return;
   const up = myUp; up.gen = gen;
@@ -568,7 +692,7 @@ function sendFile(token, gen){
     upFailed(j.error || 'Загрузка не удалась (' + x.status + ')');
   };
   x.onerror = () => { if (myUp === up) upFailed('Связь оборвалась во время загрузки. Попробуйте ещё раз.'); };
-  x.send(up.file);
+  x.send(up.body || up.file);
 }
 function dropMyUpload(){
   if (!myUp) return;
@@ -582,9 +706,22 @@ function upFailed(text){
   toast(text, 6000); renderUpload(); renderRole();
 }
 $('#upCancel').addEventListener('click', () => { dropMyUpload(); out({ t:'upcancel' }); upload = null; renderUpload(); renderRole(); });
+const fmtWait = s => s < 60 ? 'меньше минуты' : 'через ~' + Math.ceil(s / 60) + ' мин';
 function renderUpload(){
+  const early = !!upload && !!media && media.kind === 'file' && media.gen === upload.gen && media.partial;
   const show = !!upload && !(media && media.kind === 'file' && media.gen === upload.gen);
   $('#upBar').hidden = !show; $('#upCancel').hidden = !(show && myUp);
+  $('#upNote').hidden = !early;
+  if (early){
+    const pct = upload.total ? Math.min(100, Math.floor(upload.loaded / upload.total * 100)) : 0;
+    let t = 'Фильм догружается на сервер: ' + pct + '%. ';
+    if (amHost()) t += upload.safe ? 'Можно начинать ▶ — загрузка успевает за просмотром.'
+      : upload.wait != null ? 'Начать можно ' + (upload.wait < 60 ? 'меньше чем через минуту' : fmtWait(upload.wait)) + ', иначе просмотр догонит загрузку.'
+      : 'Считаем, когда можно будет начинать…';
+    else t += upload.safe ? 'Можно смотреть — он догружается по ходу.' : 'Ведущий включит, как только загрузится достаточно.';
+    if (myUp) t += ' Не закрывайте вкладку.';
+    $('#upNote').textContent = t;
+  }
   if (!show) return;
   const pct = upload.total ? Math.min(100, Math.floor(upload.loaded / upload.total * 100)) : 0;
   $('#upBar').value = pct;
@@ -756,6 +893,14 @@ function onPlayerEvent(ev){
     return;
   }
   if (amHost()){
+    // фильм ещё догружается: не даём начать раньше времени и убежать дальше загруженного
+    if (media && media.kind === 'file' && media.partial && upload && upload.gen === media.gen){
+      if (ev === 'play' && !upload.safe){ player.pause(); toast('Пока рано: подождите, пока загрузится побольше — подсказка под видео.', 4000); return; }
+      if ((ev === 'seek' || ev === 'play') && v.duration && upload.total){
+        const maxT = Math.max(0, v.duration * upload.loaded / upload.total - 30);
+        if (v.currentTime > maxT){ player.seek(maxT); toast('Дальше фильм ещё не загрузился', 3000); return; }
+      }
+    }
     if (ev === 'ended' && queue.length) { out({ t:'next' }); return; }
     if (ev === 'play' || ev === 'pause' || ev === 'seek' || ev === 'ended'){
       // даём плееру обновить время и только потом рассылаем
@@ -986,16 +1131,81 @@ function renderPeople(){
   }
 }
 
-/* ---------- реакции, подсказки, чат ---------- */
+/* ---------- реакции, стикеры, подсказки, чат ---------- */
+const REACTS = ['😂','🤣','😮','😱','😭','🥲','❤️','🔥','👏','🎉','😍','🥰','😘','😎','🤔','🤨','😴','🤯','😡','🤬','🤢','🤮','💀','👻','🙈','🙉','👀','🍿','🥤','🍕','👍','👎','🙏','💯','⚡','💔','🤡','🥶','😈','🍻'];
+const STICKERS = {
+  s1:['🍿','Попкорн готов','#f5a742'], s2:['🛋️','Я на диване','#c98a5a'], s3:['🤫','Без спойлеров!','#7c6cf0'], s4:['⏸️','Пауза!','#5aa0e8'],
+  s5:['🏃','Отошёл на минутку','#6fbf8a'], s6:['🍕','Еда приехала','#e8734f'], s7:['😴','Засыпаю…','#6a7fb8'], s8:['🤯','ЧТО?!','#e8508a'],
+  s9:['😭','Я плачу','#4fa3d1'], s10:['💀','Умер от смеха','#8a8a9e'], s11:['🙈','Не могу смотреть','#d98c3a'], s12:['👀','Ну-ка, ну-ка','#3fb8a6'],
+  s13:['🔥','Огонь!','#ef5a3c'], s14:['👏','Браво!','#e0b33a'], s15:['🤡','Ну и клоун','#d64f6e'], s16:['🎉','Ура!','#b765e0'],
+  s17:['🤔','Я понял сюжет?','#8f8a5a'], s18:['🥶','Мурашки','#56b6e8'], s19:['😱','Жуть!','#9b4fd1'], s20:['💤','Скучно','#707a8a'],
+  s21:['⏪','Ещё раз!','#3f8fd1'], s22:['⏭️','Го следующий','#4fbf6f'], s23:['❤️','Люблю этот момент','#e04f6a'], s24:['🍻','За кино!','#d9a23a'],
+};
+function stickerEl(id){
+  const s = STICKERS[id]; if (!s) return null;
+  const d = document.createElement('div'); d.className = 'stk'; d.style.setProperty('--c', s[2]);
+  const e = document.createElement('span'); e.className = 'se'; e.textContent = s[0];
+  const t = document.createElement('span'); t.className = 'st'; t.textContent = s[1];
+  d.append(e, t); return d;
+}
 function floatEmoji(e){
   const el = document.createElement('span'); el.className = 'floater'; el.textContent = e;
   el.style.left = (10 + Math.random()*80) + '%'; $('#floaters').appendChild(el);
   setTimeout(() => el.remove(), 2700);
 }
+function floatSticker(id){
+  const s = stickerEl(id); if (!s) return;
+  const el = document.createElement('span'); el.className = 'floater stkf'; el.append(s);
+  el.style.left = (8 + Math.random()*66) + '%'; $('#floaters').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+function sendReact(e){ if (ws && ws.readyState === 1) out({ t:'react', e }); else floatEmoji(e); }
 $('#reacts').addEventListener('click', e => {
-  const b = e.target.closest('button'); if (!b) return;
-  if (ws && ws.readyState === 1) out({ t:'react', e:b.dataset.e }); else floatEmoji(b.dataset.e);
+  const b = e.target.closest('button'); if (!b || !b.dataset.e) return;
+  sendReact(b.dataset.e);
 });
+// всплывающие панели (фон, реакции, стикеры): открываются у кнопки, закрываются кликом мимо или Esc
+let openPop = null;
+function showPop(pop, anchor){
+  if (openPop === pop){ closePop(); return; }
+  closePop(); pop.hidden = false; openPop = pop;
+  const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, h = pop.offsetHeight;
+  let x = Math.min(Math.max(12, r.right - w), innerWidth - w - 12);
+  let y = r.bottom + 8; if (y + h > innerHeight - 12) y = Math.max(12, r.top - h - 8);
+  pop.style.left = x + 'px'; pop.style.top = y + 'px';
+}
+function closePop(){ if (openPop){ openPop.hidden = true; openPop = null; } }
+addEventListener('pointerdown', e => { if (openPop && !openPop.contains(e.target) && !e.target.closest('[data-pop-anchor]')) closePop(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closePop(); });
+addEventListener('resize', closePop);
+for (const e of REACTS){
+  const b = document.createElement('button'); b.type = 'button'; b.textContent = e; b.setAttribute('aria-label', e);
+  b.addEventListener('click', () => { sendReact(e); closePop(); }); $('#emojis').append(b);
+}
+for (const id in STICKERS){
+  const b = document.createElement('button'); b.type = 'button'; b.title = STICKERS[id][1]; b.append(stickerEl(id));
+  b.addEventListener('click', () => { out({ t:'chat', st:id }); closePop(); }); $('#stickers').append(b);
+}
+$('#moreReacts').dataset.popAnchor = 1; $('#moreReacts').addEventListener('click', e => showPop($('#reactPop'), e.currentTarget));
+$('#stkBtn').dataset.popAnchor = 1; $('#stkBtn').addEventListener('click', e => showPop($('#stkPop'), e.currentTarget));
+// фоны
+const THEMES = [['', 'Диван', '#141012', '#f5a742'], ['cinema', 'Кино', '#12080a', '#e5484d'], ['night', 'Ночь', '#0a0e18', '#7aa2ff'], ['forest', 'Лес', '#0b120e', '#8fd17a'],
+  ['neon', 'Неон', '#0c0916', '#ff4fd8'], ['sunset', 'Закат', '#170d12', '#ff8a5c'], ['ocean', 'Океан', '#07131a', '#3fd0c9'], ['space', 'Космос', '#06060c', '#c9a0ff'],
+  ['retro', 'Ретро', '#1a150f', '#f2c14e'], ['candy', 'Конфета', '#160e17', '#ff9ec7']];
+function setTheme(t){
+  if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  store.set('divan-theme', t);
+  const tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#141012';
+  for (const b of document.querySelectorAll('#themes button')) b.setAttribute('aria-pressed', b.dataset.t === t);
+}
+for (const [t, name, bg, acc] of THEMES){
+  const b = document.createElement('button'); b.type = 'button'; b.dataset.t = t; b.title = name;
+  b.style.background = 'radial-gradient(circle at 70% 25%,' + acc + ' 0 22%,transparent 23%),' + bg;
+  const s = document.createElement('span'); s.textContent = name; b.append(s);
+  b.addEventListener('click', () => setTheme(t)); $('#themes').append(b);
+}
+setTheme(store.get('divan-theme') || '');
+for (const b of document.querySelectorAll('[data-theme-btn]')){ b.dataset.popAnchor = 1; b.addEventListener('click', e => showPop($('#themePop'), e.currentTarget)); }
 let toastTimer;
 function toast(text, ms=2200){
   const t = $('#toast'); t.textContent = text; t.style.opacity = 1;
@@ -1020,6 +1230,7 @@ function renderChat(){
     if (m.ava){ const a = document.createElement('span'); a.className = 'ava'; paintAva(a, m.emoji, m.color, m.name, m.ava); b.append(a); }
     else if (m.emoji) b.append(m.emoji + ' ');
     b.append(m.by === myId ? 'Вы' : m.name);
+    if (m.st){ const st = stickerEl(m.st); if (!st) continue; d.classList.add('sticker'); d.append(b, st); box.append(d); continue; }
     const t = document.createElement('span'); t.textContent = m.text;
     d.append(b, t); box.append(d);
   }
@@ -1197,7 +1408,7 @@ function renderRoomFriends(){
     const li = el('li');
     li.append(avaOf(f), el('span', 'who', f.name));
     if (here.has(f.login) || f.room === roomCode) li.append(el('span', 'chip ok', 'здесь'));
-    else li.append(btn('Позвать', 'btn ghost small', e => { out({ t:'invite', to:f.login }); e.target.textContent = 'Позвали ✓'; e.target.disabled = true; }));
+    else li.append(btn(media ? 'Позвать смотреть' : 'Позвать', 'btn ghost small', e => { out({ t:'invite', to:f.login }); e.target.textContent = 'Позвали ✓'; e.target.disabled = true; }));
     ul.append(li);
   }
   const off = friends.length - on.length;
@@ -1231,7 +1442,7 @@ function acctHandle(m){
       if (m.room === roomCode && myId) break;
       invRoom = m.room;
       paintAva($('#invAva'), m.from.emoji, m.from.color, m.from.name, m.from.ava);
-      $('#invText').textContent = m.from.name + ' зовёт вас в комнату' + (m.locked ? ' (с паролем — спросите его)' : '');
+      $('#invText').textContent = m.from.name + (m.what ? ' зовёт смотреть «' + m.what + '»' : ' зовёт вас в комнату') + (m.locked ? ' (с паролем — спросите его)' : '');
       $('#invitePop').hidden = false;
       clearTimeout(invTimer); invTimer = setTimeout(() => { $('#invitePop').hidden = true; }, 60000);
       try { if (document.hidden && 'Notification' in window && Notification.permission === 'granted') new Notification('Общий диван', { body: $('#invText').textContent, icon: '/icons/icon-192.png' }); } catch {}
