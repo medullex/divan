@@ -393,6 +393,7 @@ function playMedia(room, media, now, fileVid) {
   room.media = media;
   room.state = { playing: false, pos: 0, at: now };
   broadcast(room, roomInfo(room));
+  notifyRoomFriends(room);
 }
 
 function send(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
@@ -405,6 +406,9 @@ const clean = (s, n) => String(s ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').t
 const validCode = c => typeof c === 'string' && /^[a-z0-9-]{3,32}$/.test(c);
 
 accounts.setRoomLocked(code => !!(rooms.get(code) && rooms.get(code).pass));
+accounts.setRoomWhat(code => { const r = rooms.get(code); return r ? (r.media ? r.media.title : r.upload ? r.upload.name : null) : null; });
+// в комнате сменилось видео — друзья зрителей видят «смотрит „…“»
+function notifyRoomFriends(r) { for (const p of r.people.values()) if (p.login) accounts.notifyFriends(p.login); }
 
 // кто сейчас в какой комнате (для списка посетителей): метка посетителя -> код комнаты
 function liveRooms() {
