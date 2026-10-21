@@ -546,6 +546,10 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         const media = makeMedia(m);
         if (!media) return;
         if (room.queue.length >= QUEUE_MAX) return send(ws, { t: 'error', text: 'Очередь заполнена' });
+        // одно и то же видео дважды не добавляем
+        const same = x => x && x.kind === media.kind && (media.kind === 'vk' ? x.oid === media.oid && x.vid === media.vid : x.id === media.id);
+        if (room.queue.some(same)) return send(ws, { t: 'error', text: 'Это видео уже в очереди' });
+        if (same(room.media)) return send(ws, { t: 'error', text: 'Это видео уже идёт' });
         room.queue.push({ ...media, qid: crypto.randomBytes(4).toString('hex'), by: id, byName: me.name });
         broadcast(room, roomInfo(room));
         break;
