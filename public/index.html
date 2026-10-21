@@ -1607,46 +1607,63 @@ $('#chatform').addEventListener('submit', e => {
    Слушать можно без микрофона — микрофон включается отдельной кнопкой. */
 const voice = (() => {
   const WORKLET = `
+function lp(fc, sr){ // 8-й порядок Баттерворта: 4 звена-биквада
+  return [0.5098, 0.6013, 0.9000, 2.5629].map(Q => {
+    const w = 2 * Math.PI * fc / sr, a = Math.sin(w) / (2 * Q), c = Math.cos(w), a0 = 1 + a;
+    return { b0: (1 - c) / 2 / a0, b1: (1 - c) / a0, b2: (1 - c) / 2 / a0, a1: -2 * c / a0, a2: (1 - a) / a0, x1: 0, x2: 0, y1: 0, y2: 0 };
+  });
+}
+function run(f, x){
+  for (let k = 0; k < f.length; k++){ const z = f[k], y = z.b0 * x + z.b1 * z.x1 + z.b2 * z.x2 - z.a1 * z.y1 - z.a2 * z.y2; z.x2 = z.x1; z.x1 = x; z.y2 = z.y1; z.y1 = y; x = y; }
+  return x;
+}
 class Cap extends AudioWorkletProcessor {
-  constructor(){ super(); this.ratio = sampleRate / 16000; this.t = 0; this.sum = 0; this.cnt = 0; this.buf = new Float32Array(320); this.n = 0; }
+  constructor(){ super(); this.ratio = sampleRate / 16000; this.f = lp(Math.min(7000, sampleRate * 0.45), sampleRate); this.p = 0; this.pos = 1; this.buf = new Float32Array(320); this.n = 0; }
   process(inputs){
     const ch = inputs[0] && inputs[0][0]; if (!ch) return true;
     for (let i = 0; i < ch.length; i++){
-      this.sum += ch[i]; this.cnt++; this.t += 1;
-      if (this.t >= this.ratio){
-        this.t -= this.ratio; this.buf[this.n++] = this.sum / this.cnt; this.sum = 0; this.cnt = 0;
-        if (this.n === 320){ this.port.postMessage(this.buf.slice(0)); this.n = 0; }
-      }
+      const c = run(this.f, ch[i]); // сначала срезаем всё выше 7 кГц, иначе при сжатии оно превращается в металлический призвук
+      while (this.pos <= 1){ this.buf[this.n++] = this.p + (c - this.p) * this.pos; this.pos += this.ratio;
+        if (this.n === 320){ this.port.postMessage(this.buf.slice(0)); this.n = 0; } }
+      this.pos -= 1; this.p = c;
     }
     return true;
   }
 }
 class Play extends AudioWorkletProcessor {
   constructor(){
-    super(); this.q = new Map(); this.gain = new Map(); this.master = 1; this.step = 16000 / sampleRate;
+    super(); this.q = new Map(); this.gain = new Map(); this.master = 1; this.step = 16000 / sampleRate; this.f = lp(7000, sampleRate);
     this.port.onmessage = e => {
       const d = e.data;
       if (d.f){
-        let s = this.q.get(d.s); if (!s){ s = { b: [], off: 0, pos: 0, on: false, len: 0 }; this.q.set(d.s, s); }
+        let s = this.q.get(d.s); if (!s){ s = { b: [], off: 0, pos: 0, on: false, len: 0, need: 2400, gap: 0, calm: 0, last: 0 }; this.q.set(d.s, s); }
+        if (!s.on && s.gap > 0 && currentTime - s.gap < 0.4 && s.need < 4800) s.need += 800; s.gap = 0; // голос прервался посреди фразы — сеть дёргается, копим запас побольше
         s.b.push(d.f); s.len += d.f.length;
-        if (s.len > 8000){ while (s.len > 1600 && s.b.length > 1){ s.len -= s.b[0].length - s.off; s.b.shift(); s.off = 0; } } // отстали больше чем на полсекунды — догоняем
+        if (s.len > s.need + 6400){ while (s.len > s.need && s.b.length > 1){ s.len -= s.b[0].length - s.off; s.b.shift(); s.off = 0; } } // отстали — догоняем
       } else if (d.g) this.gain.set(d.g.s, d.g.v);
       else if (d.m !== undefined) this.master = d.m;
     };
   }
+  at(s, k){ // k-й отсчёт от текущего места в очереди
+    let j = s.off + k, i = 0;
+    while (i < s.b.length && j >= s.b[i].length){ j -= s.b[i].length; i++; }
+    return i < s.b.length ? s.b[i][j] : s.last;
+  }
   process(_, outputs){
     const o = outputs[0], out = o[0]; out.fill(0);
     for (const [slot, s] of this.q){
-      if (!s.on){ if (s.len >= 1600) s.on = true; else continue; } // копим 100 мс, чтобы не заикалось
+      if (!s.on){ if (s.len >= s.need) s.on = true; else continue; }
+      if (currentTime - s.calm > 15 && s.need > 2400){ s.need -= 400; s.calm = currentTime; } // сеть успокоилась — понемногу уменьшаем задержку
       const g = (this.gain.has(slot) ? this.gain.get(slot) : 1) * this.master;
       for (let i = 0; i < out.length; i++){
-        if (!s.b.length){ s.on = false; break; }
-        out[i] += s.b[0][s.off] * g;
+        if (s.len < 2){ s.on = false; s.gap = currentTime; s.calm = currentTime; s.b = []; s.len = 0; s.off = 0; break; }
+        const a = s.b[0][s.off], b = this.at(s, 1);
+        out[i] += (a + (b - a) * s.pos) * g; // плавно между отсчётами, а не «ступеньками»
         s.pos += this.step;
-        while (s.pos >= 1 && s.b.length){ s.pos -= 1; s.off++; s.len--; if (s.off >= s.b[0].length){ s.b.shift(); s.off = 0; } }
+        while (s.pos >= 1 && s.len > 1){ s.pos -= 1; s.last = a; s.off++; s.len--; if (s.off >= s.b[0].length){ s.b.shift(); s.off = 0; } }
       }
     }
-    for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, out[i]));
+    for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, run(this.f, out[i])));
     for (let c = 1; c < o.length; c++) o[c].set(out);
     return true;
   }
