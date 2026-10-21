@@ -390,7 +390,10 @@ function liveState(r) {
   const s = r.state;
   return { playing: s.playing, pos: s.playing ? s.pos + (Date.now() - s.at) / 1000 : s.pos };
 }
-const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null }));
+const peersList = r => [...r.people.entries()].map(([id, p]) => ({ id, name: p.name, color: p.color, emoji: p.emoji, login: p.login || null, ava: p.ava || null,
+  slot: p.slot, voice: p.voice ? { mic: !!p.voice.mic } : null }));
+// номер участника для голоса (1…250): им подписан каждый кусочек звука, так короче, чем полный id
+function freeSlot(r) { const used = new Set([...r.people.values()].map(p => p.slot)); for (let i = 1; i <= 250; i++) if (!used.has(i)) return i; return 0; }
 const uploadInfo = r => r.upload ? { gen: r.upload.gen, name: r.upload.name, total: r.upload.size, loaded: r.upload.loaded || 0, early: !!r.upload.early, safe: !!r.upload.safe, wait: r.upload.wait ?? null } : null;
 const roomInfo = r => ({ t: 'room', hostId: r.hostId, upload: uploadInfo(r), media: r.media, queue: r.queue, locked: !!r.pass, state: liveState(r), peers: peersList(r) });
 
@@ -447,6 +450,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
   let room = null, roomCode = null, id = null, passTries = 0;
   // антиспам: запас 80 сообщений, пополняется ~20 в секунду
   let tokens = 80, last = Date.now();
+  let vtokens = 120, vlast = Date.now(); // голос: ~50 кусочков в секунду
 
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
@@ -454,7 +458,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
   // сообщения обрабатываем строго по очереди: вход в аккаунт (запрос к базе) должен закончиться раньше, чем вход в комнату
   let chain = Promise.resolve();
   ws.on('message', (raw, isBinary) => {
-    if (isBinary) return;
+    if (isBinary) { voiceFrame(raw); return; }
     if (raw.length > 64 * 1024) return;
     const now = Date.now();
     tokens = Math.min(80, tokens + (now - last) / 50); last = now;
@@ -464,6 +468,24 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
     if (!m || typeof m.t !== 'string') return;
     chain = chain.then(() => onMessage(m, now)).catch(e => console.warn('ws:', e.message));
   });
+
+  // Голос: кусочек звука (20 мс, сжатый в 8 бит) от говорящего — пересылаем остальным в голосовом канале.
+  // Формат: [1][звук…] → остальным [1][номер говорящего][звук…]
+  function voiceFrame(buf) {
+    if (!room || buf.length < 2 || buf.length > 4000 || buf[0] !== 1) return;
+    const me = room.people.get(id);
+    if (!me || !me.voice || !me.voice.mic || !me.slot) return;
+    const now = Date.now();
+    vtokens = Math.min(120, vtokens + (now - vlast) / 15); vlast = now;
+    if (vtokens < 1) return; vtokens -= 1;
+    const out = Buffer.allocUnsafe(buf.length + 1);
+    out[0] = 1; out[1] = me.slot; buf.copy(out, 2, 1);
+    for (const [pid, p] of room.people) {
+      if (pid === id || !p.voice || p.ws.readyState !== 1) continue;
+      if (p.ws.bufferedAmount > 256 * 1024) continue; // не успевает — пропускаем кусочек, иначе голос начнёт отставать
+      p.ws.sendBinary(out);
+    }
+  }
 
   async function onMessage(m, now) {
     if (m.t === 'auth') { // вход в аккаунт: для онлайн-статуса, друзей и приглашений
@@ -517,7 +539,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
       const emoji = AVATARS.includes(m.emoji) ? m.emoji : null;
       const u = ws.user; // вошёл в аккаунт — показываем имя и аватарку из профиля
       if (vid) { ws.vid = vid; stats.touch(vid); }
-      r.people.set(id, { ws, vid: ws.vid || null, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null, ava: u ? u.ava : null });
+      r.people.set(id, { ws, slot: freeSlot(r), voice: null, vid: ws.vid || null, name: (u && u.name) || clean(m.name, 24) || 'Гость', color: (u && u.color) || color, emoji: (u && u.emoji) || emoji, login: u ? u.login : null, ava: u ? u.ava : null });
       roomCode = m.room; ws.roomCode = m.room;
       if (u) accounts.notifyFriends(u.login);
       if (!r.ownerVid && vid && !r.hostId) r.ownerVid = vid; // первый вошедший — создатель комнаты
@@ -653,6 +675,13 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         room.chat.push(msg);
         if (room.chat.length > CHAT_KEEP) room.chat.splice(0, room.chat.length - CHAT_KEEP);
         broadcast(room, msg);
+        break;
+      }
+      case 'voice': { // вошёл/вышел из голосового, включил/выключил микрофон
+        const v = m.on ? { mic: !!m.mic } : null;
+        const was = JSON.stringify(me.voice);
+        me.voice = v;
+        if (was !== JSON.stringify(v)) broadcast(room, roomInfo(room));
         break;
       }
       case 'react': {
