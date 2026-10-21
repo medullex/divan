@@ -286,6 +286,10 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 .qbtn{background:none;border:1px solid var(--line);color:var(--fg);border-radius:6px;cursor:pointer;font-size:12px;padding:3px 7px;flex:none}
 .qbtn:hover{border-color:var(--lamp)}
 .addq{margin-left:auto;flex:none}
+.queue .qfile{width:56px;aspect-ratio:16/9;border-radius:3px;background:var(--bg);display:grid;place-items:center;font-size:18px;flex:none}
+.queue .qm.qload{color:var(--lamp)}
+.qbtn:disabled{opacity:.4;cursor:default}
+.pickch{display:flex;gap:8px;flex-wrap:wrap}
 .lockchip{font:500 11px var(--mono);color:var(--lamp)}
 
 /* вход в комнату с паролем */
@@ -527,6 +531,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 
 <div class="pop" id="themePop" hidden><p class="label">Фон</p><div class="themes" id="themes"></div></div>
 <div class="pop" id="reactPop" hidden><p class="label">Реакции</p><div class="emojis" id="emojis"></div></div>
+<div class="pop" id="pickPop" hidden><p class="label">Фильм с компьютера</p><div class="pickch"><button class="btn" type="button" id="pickNow">▶ Включить сейчас</button><button class="btn ghost" type="button" id="pickQueue">＋ В очередь</button></div></div>
 <div class="pop" id="stkPop" hidden><p class="label">Стикеры</p><div class="stickers" id="stickers"></div></div>
 
 <div class="invite-pop" id="invitePop" hidden role="alert">
@@ -669,8 +674,16 @@ function handle(m){
       break;
     case 'room': onRoom(m); break;
     case 'sync': onSync(m); break;
-    case 'uptoken': sendFile(m.token, m.gen); break;
-    case 'upfail': upFailed(m.text); break;
+    case 'uptoken':
+      if (m.queued) sendQueued(m);
+      else { const p = pendingUps.get(m.cid); if (p){ myFiles.set(m.id, p.file); pendingUps.delete(m.cid); } sendFile(m.token, m.gen); }
+      break;
+    case 'upfail': {
+      const p = pendingUps.get(m.cid); pendingUps.delete(m.cid);
+      if (p && p.queued) toast(m.text, 5000); else upFailed(m.text);
+      break;
+    }
+    case 'qprog': { const q = queue.find(x => x.qid === m.qid); if (q){ q.pct = m.pct; renderQueue(); } break; }
     case 'upprog':
       if (upload && upload.gen === m.gen){
         upload.safe = !!m.safe; upload.wait = m.wait;
@@ -712,11 +725,25 @@ function onRoom(m){
    Ведущий выбирает файл -> он загружается на сервер (все видят проценты) -> у всех открывается обычная
    ссылка /media/<id>. Сам загрузивший смотрит свою копию с диска, чтобы не качать фильм обратно.
    Файл живёт на сервере, пока загрузивший в комнате. */
-const fmtMB = b => b >= 1073741824 ? (b / 1073741824).toFixed(1).replace('.', ',') + ' ГБ' : Math.round(b / 1048576) + ' МБ';
+const fmtMB = b => b >= 1073741824 ? (b / 1073741824).toFixed(1).replace('.', ',') + ' ГБ' : b >= 1048576 ? Math.round(b / 1048576) + ' МБ' : Math.max(1, Math.round(b / 1024)) + ' КБ';
 const OK_EXT = /\.(mp4|m4v|mov|webm)$/i;
-$('#pick').addEventListener('change', async e => {
-  const f = e.target.files[0]; e.target.value = ''; if (!f || !amHost()) return;
+const myFiles = new Map();    // id фильма -> мой файл: свои фильмы смотрю с диска, а не с сервера
+const pendingUps = new Map(); // cid -> { file, queued } — ждём от сервера разрешения на загрузку
+const cidOf = () => Math.random().toString(36).slice(2, 10);
+$('#pick').addEventListener('change', e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f || !myId) return;
   if (!OK_EXT.test(f.name) && !confirm('Файл «' + f.name + '» может не открыться на iPhone и в некоторых браузерах — надёжнее всего MP4 (H.264). Всё равно загрузить?')) return;
+  if (!amHost()) { queueFile(f); return; }           // зрители добавляют фильм в очередь
+  if (media) {                                         // что-то уже идёт — спросим, включить сейчас или в очередь
+    pickFile = f; showPop($('#pickPop'), document.querySelector('label.linkish[for="pick"]'));
+    return;
+  }
+  playFileNow(f);
+});
+let pickFile = null;
+$('#pickNow').addEventListener('click', () => { closePop(); if (pickFile && amHost()) playFileNow(pickFile); pickFile = null; });
+$('#pickQueue').addEventListener('click', () => { closePop(); if (pickFile) queueFile(pickFile); pickFile = null; });
+async function playFileNow(f){
   dropMyUpload();
   const up = myUp = { gen: 0, file: f, body: null, xhr: null, url: null, done: false };
   upload = { gen: -1, name: f.name, total: f.size, loaded: 0 };
@@ -725,8 +752,25 @@ $('#pick').addEventListener('change', async e => {
   const [dur, prep] = await Promise.all([probeDuration(f), prepareBody(f).catch(() => ({ body: f, early: false }))]);
   if (myUp !== up) return;
   up.body = prep.body && prep.body.size === f.size ? prep.body : f;
-  out({ t:'upreq', name: f.name, size: f.size, dur, early: !!(prep.early && dur > 0 && up.body) });
-});
+  const cid = cidOf(); pendingUps.set(cid, { file: f, queued: false });
+  out({ t:'upreq', name: f.name, size: f.size, dur, early: !!(prep.early && dur > 0 && up.body), cid });
+}
+function queueFile(f){
+  const cid = cidOf(); pendingUps.set(cid, { file: f, queued: true });
+  out({ t:'upreq', name: f.name, size: f.size, queue: true, cid });
+  toast('Фильм загружается в очередь — прогресс видно в списке «Очередь»', 3500);
+}
+// фильм в очередь: грузим фоном, проценты сервер рассылает всем сам
+function sendQueued(m){
+  const p = pendingUps.get(m.cid); if (!p) return;
+  pendingUps.delete(m.cid); myFiles.set(m.id, p.file);
+  const x = new XMLHttpRequest();
+  x.open('POST', '/api/upload?t=' + encodeURIComponent(m.token));
+  const gone = () => !queue.some(q => q.kind === 'file' && q.id === m.id) && !(media && media.id === m.id);
+  x.onload = () => { if (x.status !== 200 && !gone()){ let j = {}; try { j = JSON.parse(x.responseText); } catch {} toast(j.error || 'Фильм не загрузился', 5000); } };
+  x.onerror = () => { if (!gone()) toast('Связь оборвалась — фильм не загрузился в очередь', 5000); };
+  x.send(p.file);
+}
 function probeDuration(file){
   return new Promise(ok => {
     const el = document.createElement('video'), url = URL.createObjectURL(file);
@@ -958,6 +1002,7 @@ function filePlayer(m, onEvent){
   const mine = myUp && myUp.gen === m.gen;
   let url = '/media/' + m.id;
   if (mine){ if (!myUp.url) myUp.url = URL.createObjectURL(myUp.file); url = myUp.url; }
+  else if (myFiles.has(m.id)) url = URL.createObjectURL(myFiles.get(m.id)); // свой фильм из очереди — тоже с диска
   const on = {
     loadedmetadata: () => onEvent('ready'), play: () => onEvent('play'), pause: () => { if (!v.ended) onEvent('pause'); },
     seeked: () => onEvent('seek'), ended: () => onEvent('ended'),
@@ -1249,14 +1294,18 @@ function renderQueue(){
     const li = document.createElement('li');
     const img = document.createElement('img'); img.alt = ''; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
     if (q.thumb) img.src = q.thumb;
+    if (q.kind === 'file'){ img.replaceWith(Object.assign(document.createElement('span'), { className: 'qfile', textContent: '🎞️' })); }
     const info = document.createElement('div'); info.className = 'qi';
     const t = document.createElement('span'); t.className = 'qt'; t.textContent = (i + 1) + '. ' + q.title; t.title = q.title;
     const m = document.createElement('span'); m.className = 'qm';
-    m.textContent = (q.dur ? fmt(q.dur) + ' · ' : '') + (q.kind === 'vk' ? 'VK' : 'Rutube') + ' · ' + (q.by === myId ? 'вы' : (q.byName || ''));
+    m.textContent = (q.kind === 'file' ? (q.loading ? 'загружается ' + (q.pct || 0) + '%' : fmtMB(q.size || 0)) + ' · файл'
+      : (q.dur ? fmt(q.dur) + ' · ' : '') + (q.kind === 'vk' ? 'VK' : 'Rutube')) + ' · ' + (q.by === myId ? 'вы' : (q.byName || ''));
+    if (q.loading) m.classList.add('qload');
     info.append(t, m); li.append(img, info);
     const btn = (txt, title, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'qbtn'; b.textContent = txt; b.title = title; b.addEventListener('click', fn); li.append(b); };
     if (amHost()){
-      btn('▶', 'Включить сейчас', () => out({ t:'qplay', qid: q.qid }));
+      btn('▶', q.loading ? 'Ещё загружается' : 'Включить сейчас', () => out({ t:'qplay', qid: q.qid }));
+      if (q.loading) li.lastChild.disabled = true;
       if (i > 0) btn('↑', 'Выше', () => out({ t:'qmove', qid: q.qid }));
     }
     if (amHost() || q.by === myId) btn('✕', 'Убрать из очереди', () => out({ t:'qdel', qid: q.qid }));
@@ -1309,8 +1358,9 @@ function renderRole(){
   if (!$('#results').children.length) $('#searchMsg').textContent = host
     ? 'Поиск идёт по Rutube. Нажмите на видео — включится у всех; «+ В очередь» — посмотрите следующим. VK Видео вставьте ссылкой.'
     : 'Найдите видео и нажмите на него — оно попадёт в очередь. Включает ведущий.';
-  document.querySelector('label.linkish[for="pick"]').hidden = !host;
-  const mineFile = media && media.kind === 'file' && myUp && myUp.gen === media.gen;
+  { const l = document.querySelector('label.linkish[for="pick"]'); l.hidden = false;
+    l.textContent = !host ? 'или добавить фильм с компьютера в очередь' : media ? 'или фильм с компьютера — сейчас или в очередь' : 'или загрузить фильм с компьютера'; }
+  const mineFile = media && media.kind === 'file' && ((myUp && myUp.gen === media.gen) || myFiles.has(media.id));
   if (media){
     $('#empty').hidden = true;
     $('#fname').textContent = media.title || '';
