@@ -269,7 +269,15 @@ aside{background:var(--seat);border:1px solid var(--line);border-radius:6px;disp
 input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:999px;padding:10px 14px;font:15px var(--body)}
 
 /* очередь */
-.queue{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:200px;overflow-y:auto}
+.queue{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:150px;overflow-y:auto}
+.qhead{all:unset;cursor:pointer;display:flex;align-items:center;gap:6px;width:100%}
+.qhead .label{margin:0}
+.qhead .arr{color:var(--muted);font-size:11px;transition:transform .2s}
+.qsec.closed .arr{transform:rotate(-90deg)}
+.qsec.closed .queue,.qsec.closed #nextBtn{display:none!important}
+.qsec:not(.closed) .qhead{margin-bottom:8px}
+.chat{min-height:170px}
+@media (max-width:820px){aside{height:auto}.chat{min-height:260px;max-height:55vh}}
 .queue li{display:flex;gap:8px;align-items:center;min-width:0;font-size:13px}
 .queue img{width:56px;aspect-ratio:16/9;object-fit:cover;border-radius:3px;background:#000;flex:none}
 .queue .qi{min-width:0;flex:1;display:flex;flex-direction:column}
@@ -503,7 +511,7 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
         <ul class="flist room-friends" id="roomFriends"></ul>
       </div>
       <div class="sec">
-        <p class="label">Очередь <span id="qCount"></span></p>
+        <button class="qhead" type="button" id="qHead" aria-expanded="true"><span class="label">Очередь <span id="qCount"></span></span><span class="arr">▼</span></button>
         <ul class="queue" id="queue"></ul>
         <button class="btn ghost small" id="nextBtn" type="button" hidden style="margin-top:8px">Следующее ▶▶</button>
       </div>
@@ -1160,6 +1168,9 @@ async function choose(item, toQueue){
   if (!it.title) it.title = it.kind === 'vk' ? 'Видео из VK' : 'Видео с Rutube';
   const payload = { kind: it.kind, id: it.id, oid: it.oid, vid: it.vid, hash: it.hash, title: it.title, dur: it.dur || 0, thumb: it.thumb || '' };
   if (queueIt){
+    const same = x => x && x.kind === it.kind && (it.kind === 'vk' ? x.oid === it.oid && x.vid === it.vid : x.id === it.id);
+    if (queue.some(same)) { toast('Это видео уже в очереди', 3000); return; }
+    if (same(media)) { toast('Это видео уже идёт', 3000); return; }
     out({ t:'qadd', ...payload });
     toast('Добавлено в очередь: ' + it.title);
     if (!amHost()) { $('#searchMsg').textContent = 'Добавлено в очередь. Ведущий включит, когда дойдёт черёд.'; }
@@ -1223,6 +1234,11 @@ $('#searchForm').addEventListener('submit', async e => {
 function renderQueue(){
   const ul = $('#queue'); ul.replaceChildren();
   $('#qCount').textContent = queue.length ? '(' + queue.length + ')' : '';
+  // свёрнута очередь или нет — запоминаем; длинную очередь сворачиваем сами, чтобы не задавила чат
+  { const sec = $('#qHead').closest('.sec'); sec.classList.add('qsec');
+    const pref = store.get('divan-qopen');
+    const closed = pref ? pref === '0' : queue.length > 3;
+    sec.classList.toggle('closed', closed); $('#qHead').setAttribute('aria-expanded', !closed); }
   $('#nextBtn').hidden = !(amHost() && queue.length);
   if (!queue.length){
     const li = document.createElement('li'); li.className = 'hint';
@@ -1248,6 +1264,11 @@ function renderQueue(){
   });
 }
 $('#nextBtn').addEventListener('click', () => out({ t:'next' }));
+$('#qHead').addEventListener('click', () => {
+  const sec = $('#qHead').closest('.sec'), closed = !sec.classList.contains('closed');
+  sec.classList.toggle('closed', closed); $('#qHead').setAttribute('aria-expanded', !closed);
+  store.set('divan-qopen', closed ? '0' : '1');
+});
 
 /* ---------- пароль на комнату ---------- */
 function renderLock(){
@@ -1278,6 +1299,8 @@ $('#gateForm').addEventListener('submit', e => {
 });
 
 /* ---------- отрисовка ---------- */
+// «Ведущий — Аня.» или, если ведущего сейчас нет в зале, «Ведущий переподключается.»
+function hostPhrase(){ const p = peers.find(x => x.id === hostId); return p ? 'Ведущий — ' + p.name + '.' : 'Ведущий переподключается.'; }
 function nameOf(id){ return (peers.find(p => p.id === id) || {}).name || 'ведущий'; }
 function renderRole(){
   const host = amHost();
@@ -1294,7 +1317,7 @@ function renderRole(){
     const where = media.kind === 'file' ? '' : ' Видео показывается через официальный плеер ' + (media.kind === 'vk' ? 'VK Видео' : 'Rutube') + '.';
     $('#roleNote').textContent = (host
       ? 'Вы ведущий. Ваши пауза и перемотка действуют на всех.' + where
-      : 'Ведущий — ' + nameOf(hostId) + '. Пауза и перемотка у вас меняются вместе с ним.')
+      : hostPhrase() + ' Пауза и перемотка у вас меняются вместе с ним.')
       + (mineFile ? ' Фильм загружен с вашего компьютера: не закрывайте вкладку, пока смотрите — иначе он пропадёт у всех.' : '');
     $('#joinbar').hidden = host || joined;
     renderUpload();
@@ -1309,7 +1332,7 @@ function renderRole(){
     $('#emptyText').textContent = 'Он откроется у всех в комнате. Можно вставить ссылку на Rutube или VK Видео, или загрузить фильм со своего компьютера.';
     $('#emptyPick').hidden = true; $('#retryBtn').hidden = true;
   } else {
-    $('#roleNote').textContent = hostId ? 'Ведущий — ' + nameOf(hostId) + '. Видео, пауза и перемотка у вас меняются вместе с ним.'
+    $('#roleNote').textContent = hostId ? hostPhrase() + ' Видео, пауза и перемотка у вас меняются вместе с ним.'
       : 'Ведущий переподключается… Если он не вернётся за 20 секунд, управление перейдёт другому.';
     $('#emptyPick').hidden = true; $('#retryBtn').hidden = true;
     $('#empty').hidden = false;
