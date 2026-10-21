@@ -290,6 +290,23 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 .queue .qm.qload{color:var(--lamp)}
 .qbtn:disabled{opacity:.4;cursor:default}
 .pickch{display:flex;gap:8px;flex-wrap:wrap}
+/* голосовой чат */
+.vrow{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.vrow .vgear{margin-left:auto;font-size:16px;text-decoration:none}
+.vmic.on{border-color:var(--ok);color:var(--ok)}
+.vhint{margin-top:6px;font-size:12px}
+.vico{font-size:12px}
+#people li .ava{transition:box-shadow .15s}
+#people li.talk .ava{box-shadow:0 0 0 2px var(--ok),0 0 12px color-mix(in srgb,var(--ok) 70%,transparent)}
+.vpop{width:min(320px,calc(100vw - 16px))}
+.vf{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--muted);margin:8px 0}
+.vf select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font:14px var(--body);max-width:100%}
+.vf input[type=range],.vprow input{accent-color:var(--lamp);width:100%}
+.vmeter{position:relative;height:8px;border-radius:999px;background:var(--bg);border:1px solid var(--line);overflow:hidden;margin:-2px 0 6px}
+.vmeter span{position:absolute;inset:0 auto 0 0;width:0;background:var(--muted);transition:width .08s}
+.vmeter span.hot{background:var(--ok)}
+.vmeter i{position:absolute;top:0;bottom:0;width:2px;background:var(--lamp)}
+.vprow{display:flex;gap:10px;align-items:center;min-width:220px}
 .lockchip{font:500 11px var(--mono);color:var(--lamp)}
 
 /* вход в комнату с паролем */
@@ -506,6 +523,15 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
     </section>
 
     <aside>
+      <div class="sec vsec">
+        <div class="vrow">
+          <button class="btn small" type="button" id="vJoin">🎧 Войти в голосовой</button>
+          <button class="btn ghost small vmic" type="button" id="vMic" hidden>🔇 Включить микрофон</button>
+          <button class="btn ghost small" type="button" id="vLeave" hidden>Выйти</button>
+          <button class="mini vgear" type="button" id="vGear" title="Настройки звука" aria-label="Настройки звука">⚙</button>
+        </div>
+        <p class="hint vhint" id="vHint"></p>
+      </div>
       <div class="sec">
         <p class="label">В зале</p>
         <ul class="people" id="people"></ul>
@@ -532,6 +558,17 @@ input[type=password]{min-width:0;background:var(--bg);color:var(--fg);border:1px
 <div class="pop" id="themePop" hidden><p class="label">Фон</p><div class="themes" id="themes"></div></div>
 <div class="pop" id="reactPop" hidden><p class="label">Реакции</p><div class="emojis" id="emojis"></div></div>
 <div class="pop" id="pickPop" hidden><p class="label">Фильм с компьютера</p><div class="pickch"><button class="btn" type="button" id="pickNow">▶ Включить сейчас</button><button class="btn ghost" type="button" id="pickQueue">＋ В очередь</button></div></div>
+<div class="pop vpop" id="vPop" hidden>
+  <p class="label">Звук</p>
+  <label class="vf">Микрофон<select id="vIn"></select></label>
+  <label class="vf" id="vOutRow">Динамики<select id="vOut"></select></label>
+  <label class="vf">Чувствительность микрофона<input type="range" id="vSens" min="0" max="100"></label>
+  <div class="vmeter" title="Громкость вашего микрофона; черта — с какой громкости вас слышно"><span id="vLevel"></span><i id="vThr"></i></div>
+  <label class="vf">Громкость фильма<input type="range" id="vFilm" min="0" max="100"></label>
+  <label class="vf">Громкость голосов<input type="range" id="vVoices" min="0" max="150"></label>
+  <p class="hint">Громкость каждого человека — кнопкой 🔊 рядом с ним в списке «В зале».</p>
+</div>
+<div class="pop" id="vpPop" hidden><p class="label" id="vpName"></p><div class="vprow"><input type="range" id="vpVol" min="0" max="200"><span class="muted" id="vpVal"></span></div></div>
 <div class="pop" id="stkPop" hidden><p class="label">Стикеры</p><div class="stickers" id="stickers"></div></div>
 
 <div class="invite-pop" id="invitePop" hidden role="alert">
@@ -644,8 +681,9 @@ function connect(){
   ws.onopen = () => { retry = 0;
     const tk = store.get('divan-token'); if (tk) ws.send(JSON.stringify({ t:'auth', token:tk }));
     ws.send(JSON.stringify({ t:'hello', vid:VID, room:roomCode, name:myName, emoji:myEmoji, color:myColor, pass:myPass })); };
+  ws.binaryType = 'arraybuffer';
   ws.onmessage = e => {
-    if (typeof e.data !== 'string') return;
+    if (typeof e.data !== 'string') { voice.rx(e.data); return; } // кусочек голоса
     let m; try { m = JSON.parse(e.data); } catch { return; } handle(m);
   };
   ws.onclose = () => {
@@ -670,7 +708,7 @@ function handle(m){
       $('#gate').hidden = true; $('#hallMain').hidden = false;
       myId = m.id; chat = m.chat || []; renderChat();
       setConn(true, 'комната ' + roomCode);
-      onRoom(m);
+      onRoom(m); voice.rejoin();
       break;
     case 'room': onRoom(m); break;
     case 'sync': onSync(m); break;
@@ -718,7 +756,7 @@ function onRoom(m){
   renderRoomFriends();
   if (prevHost !== hostId && hostId === myId && prevHost && prevHost !== myId) toast('Теперь вы ведущий');
   handleMedia(m.media || null, m.state);
-  renderRole(); renderPeople(); renderQueue(); renderLock(); pc.render();
+  renderRole(); renderPeople(); renderQueue(); renderLock(); pc.render(); voice.onPeers();
 }
 
 /* ---------- фильм с компьютера ----------
@@ -1027,6 +1065,11 @@ function filePlayer(m, onEvent){
 }
 $('#soundBtn').addEventListener('click', () => { v.muted = false; v.play().catch(()=>{}); $('#soundbar').hidden = true; });
 
+function filmVolume(x){
+  x = Math.max(0, Math.min(1, x));
+  v.volume = x; v.muted = x === 0; store.set('divan-vol', String(x));
+  if (player && player.setVolume) player.setVolume(x);
+}
 /* ---------- плееры Rutube и VK Видео ---------- */
 let media = null, mediaKey = '', player = null, joined = false, joinedOnce = false;
 let lastState = null, embApplying = false, embTimer = null, hbTimer = null;
@@ -1069,6 +1112,7 @@ function rutubePlayer(id, onEvent){
     play(){ send('player:play'); },
     pause(){ send('player:pause'); },
     seek(s){ send('player:setCurrentTime', { time: s }); t = s; tAt = performance.now(); },
+    setVolume(x){ send('player:setVolume', { volume: x }); },
     time(){ return playing ? t + (performance.now() - tAt) / 1000 : t; },
     isPlaying(){ return playing; },
     destroy(){ removeEventListener('message', onMsg); f.remove(); },
@@ -1104,6 +1148,7 @@ function vkPlayer(m, onEvent){
     play(){ try { p && p.play(); } catch {} },
     pause(){ try { p && p.pause(); } catch {} },
     seek(s){ try { p && p.seek(s); } catch {} },
+    setVolume(x){ try { p && p.setVolume(x); } catch {} },
     time(){ try { return (p && p.getCurrentTime()) || 0; } catch { return 0; } },
     isPlaying(){ try { return !!p && p.getState() === 'playing'; } catch { return false; } },
     destroy(){ dead = true; try { p && p.destroy(); } catch {} f.remove(); },
@@ -1395,16 +1440,21 @@ function renderRole(){
 function renderPeople(){
   const ul = $('#people'); ul.replaceChildren();
   for (const p of peers){
-    const li = document.createElement('li');
+    const li = document.createElement('li'); if (p.slot) li.dataset.slot = p.slot;
     const a = document.createElement('span'); a.className = 'ava';
     paintAva(a, p.emoji, p.color, p.name, p.ava);
     const n = document.createElement('span'); n.className = 'pname';
     n.textContent = p.id === myId ? p.name + ' (вы)' : p.name;
+    if (p.voice){ const vi = document.createElement('span'); vi.className = 'vico'; vi.textContent = p.voice.mic ? '🎙' : '🎧'; vi.title = p.voice.mic ? 'в голосовом, с микрофоном' : 'в голосовом, слушает'; n.append(' ', vi); }
     const c = document.createElement('span'); c.className = 'chip';
     if (p.id === hostId){ c.textContent = 'ведущий'; c.classList.add('host'); }
     else c.textContent = 'зритель';
     li.append(a, n, c);
     const fb = friendBtnFor(p); if (fb) li.append(fb);
+    if (p.voice && p.voice.mic && p.id !== myId && voice.joined){
+      const vb = document.createElement('button'); vb.className = 'mini'; vb.type = 'button'; vb.textContent = '🔊'; vb.title = 'Громкость этого человека';
+      vb.dataset.popAnchor = 1; vb.addEventListener('click', () => voice.personVol(p, vb)); li.append(vb);
+    }
     if (amHost() && p.id !== myId){
       const g = document.createElement('button'); g.className = 'mini'; g.type = 'button';
       g.textContent = 'сделать ведущим'; g.addEventListener('click', () => out({ t:'givehost', to:p.id }));
@@ -1549,6 +1599,225 @@ $('#chatform').addEventListener('submit', e => {
   const inp = $('#chatin'); const text = inp.value.trim(); if (!text) return;
   out({ t:'chat', text }); inp.value = '';
 });
+
+/* ---------- голосовой чат ----------
+   Голос идёт через наш сервер (прямое соединение мобильный интернет не пускает):
+   микрофон → 16 кГц → 8 бит (μ-law, как в телефонии) → кусочки по 20 мс → сервер → остальным.
+   Отправляем только когда человек говорит (порог громкости), поэтому тишина трафик не ест.
+   Слушать можно без микрофона — микрофон включается отдельной кнопкой. */
+const voice = (() => {
+  const WORKLET = `
+class Cap extends AudioWorkletProcessor {
+  constructor(){ super(); this.ratio = sampleRate / 16000; this.t = 0; this.sum = 0; this.cnt = 0; this.buf = new Float32Array(320); this.n = 0; }
+  process(inputs){
+    const ch = inputs[0] && inputs[0][0]; if (!ch) return true;
+    for (let i = 0; i < ch.length; i++){
+      this.sum += ch[i]; this.cnt++; this.t += 1;
+      if (this.t >= this.ratio){
+        this.t -= this.ratio; this.buf[this.n++] = this.sum / this.cnt; this.sum = 0; this.cnt = 0;
+        if (this.n === 320){ this.port.postMessage(this.buf.slice(0)); this.n = 0; }
+      }
+    }
+    return true;
+  }
+}
+class Play extends AudioWorkletProcessor {
+  constructor(){
+    super(); this.q = new Map(); this.gain = new Map(); this.master = 1; this.step = 16000 / sampleRate;
+    this.port.onmessage = e => {
+      const d = e.data;
+      if (d.f){
+        let s = this.q.get(d.s); if (!s){ s = { b: [], off: 0, pos: 0, on: false, len: 0 }; this.q.set(d.s, s); }
+        s.b.push(d.f); s.len += d.f.length;
+        if (s.len > 8000){ while (s.len > 1600 && s.b.length > 1){ s.len -= s.b[0].length - s.off; s.b.shift(); s.off = 0; } } // отстали больше чем на полсекунды — догоняем
+      } else if (d.g) this.gain.set(d.g.s, d.g.v);
+      else if (d.m !== undefined) this.master = d.m;
+    };
+  }
+  process(_, outputs){
+    const o = outputs[0], out = o[0]; out.fill(0);
+    for (const [slot, s] of this.q){
+      if (!s.on){ if (s.len >= 1600) s.on = true; else continue; } // копим 100 мс, чтобы не заикалось
+      const g = (this.gain.has(slot) ? this.gain.get(slot) : 1) * this.master;
+      for (let i = 0; i < out.length; i++){
+        if (!s.b.length){ s.on = false; break; }
+        out[i] += s.b[0][s.off] * g;
+        s.pos += this.step;
+        while (s.pos >= 1 && s.b.length){ s.pos -= 1; s.off++; s.len--; if (s.off >= s.b[0].length){ s.b.shift(); s.off = 0; } }
+      }
+    }
+    for (let i = 0; i < out.length; i++) out[i] = Math.max(-1, Math.min(1, out[i]));
+    for (let c = 1; c < o.length; c++) o[c].set(out);
+    return true;
+  }
+}
+registerProcessor('divan-cap', Cap); registerProcessor('divan-play', Play);`;
+  // μ-law: 16 бит → 8 бит, как в обычной телефонной связи
+  const DEC = new Float32Array(256);
+  for (let i = 0; i < 256; i++){ const u = ~i & 0xff, sign = u & 0x80, exp = (u >> 4) & 7, mant = u & 0x0f; let s = ((mant << 3) + 0x84) << exp; s -= 0x84; DEC[i] = (sign ? -s : s) / 32768; }
+  function enc(x){
+    let s = Math.max(-1, Math.min(1, x)) * 32635, sign = 0;
+    if (s < 0){ sign = 0x80; s = -s; }
+    s = (s | 0) + 0x84;
+    let exp = 7; for (let m = 0x4000; (s & m) === 0 && exp > 0; m >>= 1) exp--;
+    return ~(sign | (exp << 4) | ((s >> (exp + 3)) & 0x0f)) & 0xff;
+  }
+  const num = (k, d) => { const x = parseFloat(store.get(k)); return Number.isFinite(x) ? x : d; };
+  let ctx = null, player = null, cap = null, src = null, stream = null, joined = false, micOn = false, starting = false;
+  let hangUntil = 0, talking = false, level = 0;
+  let sens = num('divan-vsens', 70), voicesVol = num('divan-vvol', 100), inDev = store.get('divan-vin') || '', outDev = store.get('divan-vout') || '';
+  let gains = {}; try { gains = JSON.parse(store.get('divan-vgain') || '{}') || {}; } catch {}
+  const talkers = new Map(); // номер участника -> до какого времени подсвечивать «говорит»
+  const thr = () => 0.003 + (1 - sens / 100) * 0.05;
+  const keyOf = p => p.login ? '@' + p.login : 'n:' + p.name;
+  const peerBySlot = s => peers.find(p => p.slot === s);
+
+  function setTalk(slot, on){
+    const li = document.querySelector('#people li[data-slot="' + slot + '"]'); if (li) li.classList.toggle('talk', on);
+  }
+  setInterval(() => { const now = performance.now(); for (const [s, t] of talkers) if (now > t){ talkers.delete(s); setTalk(s, false); } }, 150);
+
+  async function ensureCtx(){
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: 'text/javascript' }));
+    await ctx.audioWorklet.addModule(url); URL.revokeObjectURL(url);
+    player = new AudioWorkletNode(ctx, 'divan-play', { numberOfInputs: 0, outputChannelCount: [2] });
+    player.connect(ctx.destination);
+    player.port.postMessage({ m: voicesVol / 100 });
+    applyGains(); applySink();
+  }
+  async function join(){
+    if (joined || starting) return;
+    starting = true;
+    try { const p = ensureCtx(); if (ctx && ctx.state === 'suspended') ctx.resume(); await p; await ctx.resume(); joined = true; send(); }
+    catch (e) { console.warn('voice', e); toast('Этот браузер не умеет голосовой чат. Откройте сайт в свежем Chrome, Edge или Safari.', 5000); }
+    starting = false; render();
+  }
+  function leave(){
+    micOff(); joined = false; send();
+    if (ctx){ try { ctx.close(); } catch {} ctx = null; player = null; }
+    render();
+  }
+  async function micOnFn(){
+    if (!joined) await join();
+    if (!joined || micOn) return;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: inDev ? { exact: inDev } : undefined, echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
+    } catch (e) {
+      if (inDev){ inDev = ''; store.set('divan-vin', ''); return micOnFn(); } // выбранного микрофона больше нет — берём обычный
+      toast(e && e.name === 'NotAllowedError' ? 'Браузер не дал доступ к микрофону. Разрешите его в настройках сайта (значок замка у адреса).' : 'Не удалось включить микрофон', 6000);
+      return;
+    }
+    src = ctx.createMediaStreamSource(stream);
+    cap = new AudioWorkletNode(ctx, 'divan-cap', { numberOfOutputs: 1 });
+    const sink = ctx.createGain(); sink.gain.value = 0; // узел должен быть подключён, иначе браузер его не запускает
+    src.connect(cap); cap.connect(sink); sink.connect(ctx.destination);
+    cap.port.onmessage = e => frame(e.data);
+    micOn = true; send(); render(); fillDevices();
+  }
+  function micOff(){
+    if (stream){ for (const t of stream.getTracks()) t.stop(); stream = null; }
+    if (cap){ try { cap.disconnect(); } catch {} cap = null; }
+    if (src){ try { src.disconnect(); } catch {} src = null; }
+    if (micOn){ micOn = false; talking = false; if (myId) setTalk(mySlot(), false); send(); }
+    render();
+  }
+  const mySlot = () => (peers.find(p => p.id === myId) || {}).slot;
+  function frame(f){
+    let sq = 0; for (let i = 0; i < f.length; i++) sq += f[i] * f[i];
+    level = Math.sqrt(sq / f.length);
+    const now = performance.now();
+    if (level > thr()) hangUntil = now + 400; // после фразы держим ещё 0,4 с, чтобы не обрезать окончания
+    const t = micOn && now < hangUntil;
+    if (t !== talking){ talking = t; setTalk(mySlot(), t); }
+    if (!t || !ws || ws.readyState !== 1) return;
+    const u = new Uint8Array(f.length + 1); u[0] = 1;
+    for (let i = 0; i < f.length; i++) u[i + 1] = enc(f[i]);
+    ws.send(u.buffer);
+  }
+  function rx(buf){
+    if (!joined || !player) return;
+    const u = new Uint8Array(buf); if (u.length < 3 || u[0] !== 1) return;
+    const slot = u[1], f = new Float32Array(u.length - 2);
+    for (let i = 2; i < u.length; i++) f[i - 2] = DEC[u[i]];
+    player.port.postMessage({ s: slot, f }, [f.buffer]);
+    if (!talkers.has(slot)) setTalk(slot, true);
+    talkers.set(slot, performance.now() + 350);
+    rxCount++;
+  }
+  let rxCount = 0;
+  function send(){ out({ t:'voice', on: joined, mic: joined && micOn }); }
+  function applyGains(){
+    if (!player) return;
+    for (const p of peers) if (p.slot) player.port.postMessage({ g: { s: p.slot, v: (gains[keyOf(p)] ?? 100) / 100 } });
+  }
+  function applySink(){
+    if (!outDev) return;
+    if (ctx && ctx.setSinkId) ctx.setSinkId(outDev).catch(() => {});
+    if (v.setSinkId) v.setSinkId(outDev).catch(() => {});
+  }
+  async function fillDevices(){
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    let list = []; try { list = await navigator.mediaDevices.enumerateDevices(); } catch {}
+    const fill = (sel, kind, cur, def) => {
+      sel.replaceChildren(Object.assign(document.createElement('option'), { value: '', textContent: def }));
+      list.filter(d => d.kind === kind && d.deviceId && d.deviceId !== 'default').forEach((d, i) => sel.append(Object.assign(document.createElement('option'), { value: d.deviceId, textContent: d.label || (kind === 'audioinput' ? 'Микрофон ' : 'Динамики ') + (i + 1) })));
+      sel.value = cur; if (sel.value !== cur) sel.value = '';
+    };
+    fill($('#vIn'), 'audioinput', inDev, 'Как в системе');
+    fill($('#vOut'), 'audiooutput', outDev, 'Как в системе');
+    $('#vOutRow').hidden = !(window.AudioContext && AudioContext.prototype.setSinkId); // выбор динамиков есть только в Chrome/Edge
+  }
+  function render(){
+    $('#vJoin').hidden = joined; $('#vLeave').hidden = !joined; $('#vMic').hidden = !joined;
+    $('#vMic').textContent = micOn ? '🎤 Микрофон включён' : '🔇 Включить микрофон';
+    $('#vMic').classList.toggle('on', micOn);
+    const inVoice = peers.filter(p => p.voice);
+    $('#vHint').textContent = joined
+      ? (micOn ? 'Вас слышно, когда говорите. Лучше в наушниках — иначе микрофон ловит звук фильма.' : 'Вы слушаете. Чтобы говорить, включите микрофон.')
+      : inVoice.length ? 'В голосовом: ' + inVoice.map(p => p.name).join(', ') : 'Говорите голосом прямо во время фильма.';
+  }
+  // ползунки и списки в настройках
+  $('#vSens').value = sens; $('#vVoices').value = voicesVol;
+  $('#vSens').addEventListener('input', e => { sens = +e.target.value; store.set('divan-vsens', String(sens)); });
+  $('#vVoices').addEventListener('input', e => { voicesVol = +e.target.value; store.set('divan-vvol', String(voicesVol)); if (player) player.port.postMessage({ m: voicesVol / 100 }); });
+  $('#vFilm').addEventListener('input', e => filmVolume(+e.target.value / 100));
+  $('#vIn').addEventListener('change', e => { inDev = e.target.value; store.set('divan-vin', inDev); if (micOn){ micOff(); micOnFn(); } });
+  $('#vOut').addEventListener('change', e => { outDev = e.target.value; store.set('divan-vout', outDev); applySink(); });
+  $('#vJoin').addEventListener('click', join);
+  $('#vLeave').addEventListener('click', leave);
+  $('#vMic').addEventListener('click', () => { if (micOn) micOff(); else micOnFn(); });
+  $('#vGear').dataset.popAnchor = 1;
+  $('#vGear').addEventListener('click', e => { $('#vFilm').value = Math.round((v.muted ? 0 : v.volume) * 100); fillDevices(); showPop($('#vPop'), e.currentTarget); meter(); });
+  // индикатор громкости микрофона в настройках
+  function meter(){
+    if ($('#vPop').hidden) return;
+    $('#vLevel').style.width = Math.min(100, level / 0.08 * 100) + '%';
+    $('#vThr').style.left = Math.min(100, thr() / 0.08 * 100) + '%';
+    $('#vLevel').classList.toggle('hot', talking);
+    requestAnimationFrame(meter);
+  }
+  // громкость отдельного человека
+  let vpKey = null, vpSlot = null;
+  $('#vpVol').addEventListener('input', e => {
+    if (!vpKey) return; gains[vpKey] = +e.target.value; store.set('divan-vgain', JSON.stringify(gains));
+    if (player && vpSlot) player.port.postMessage({ g: { s: vpSlot, v: gains[vpKey] / 100 } });
+    $('#vpVal').textContent = gains[vpKey] + '%';
+  });
+  return {
+    rx, render,
+    get joined(){ return joined; },
+    get rxCount(){ return rxCount; },
+    rejoin(){ if (joined) send(); },
+    onPeers(){ applyGains(); render(); },
+    personVol(p, anchor){
+      vpKey = keyOf(p); vpSlot = p.slot;
+      $('#vpName').textContent = 'Громкость: ' + p.name; $('#vpVol').value = gains[vpKey] ?? 100; $('#vpVal').textContent = (gains[vpKey] ?? 100) + '%';
+      showPop($('#vpPop'), anchor);
+    },
+  };
+})();
 
 /* ---------- установка как приложение ---------- */
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
