@@ -117,7 +117,10 @@ const randId = n => crypto.randomBytes(n).toString('hex');
 function unlinkQuiet(f) { if (f) fs.unlink(f, () => {}); }
 function findUpload(token) {
   if (typeof token !== 'string' || !/^[a-f0-9]{48}$/.test(token)) return null;
-  for (const [code, r] of rooms) if (r.upload && r.upload.token === token) return { code, r, up: r.upload };
+  for (const [code, r] of rooms) {
+    if (r.upload && r.upload.token === token) return { code, r, up: r.upload };
+    if (r.qups.has(token)) return { code, r, up: r.qups.get(token) };
+  }
   return null;
 }
 // Можно ли уже начинать смотреть, пока фильм догружается: сравниваем скорость загрузки с «весом» секунды фильма.
@@ -133,7 +136,8 @@ function judgeEarly(up) {
   if (L >= need) return { safe: true, wait: 0 };
   return { safe: false, wait: Math.ceil((need - L) / up.rate) };
 }
-// приём файла: тело запроса пишется на диск по кусочкам, в памяти не держим
+// приём файла: тело запроса пишется на диск по кусочкам, в памяти не держим.
+// Бывает двух видов: «включить сейчас» (room.upload, одна на комнату) и «в очередь» (room.qups, фоном).
 function apiUpload(req, res, token) {
   if (req.method !== 'POST') { res.writeHead(405); return res.end(); }
   const f = findUpload(token);
@@ -146,24 +150,25 @@ function apiUpload(req, res, token) {
   const final = path.join(UPLOAD_DIR, up.id + up.ext);
   const out = fs.createWriteStream(final);
   let got = 0, done = false, lastSent = 0, rateAt = Date.now(), rateBytes = 0;
+  const alive = () => up.queued ? r.qups.get(up.token) === up : r.upload === up;
+  const entry = () => ({ path: final, size: up.size, mime: VIDEO_TYPES[up.ext] || 'application/octet-stream', up: up.done ? null : up });
   const publish = () => {
-    files.set(up.id, { path: final, size: up.size, mime: VIDEO_TYPES[up.ext] || 'application/octet-stream', up: up.done ? null : up });
+    files.set(up.id, entry());
     playMedia(r, { kind: 'file', id: up.id, title: up.name, size: up.size, gen: up.gen, partial: !up.done }, Date.now(), up.vid);
   };
   const fail = (code, text) => {
     if (done) return; done = true;
     up.failed = true; up.ev.emit('more');
     out.destroy(); unlinkQuiet(final);
-    if (r.file && r.file.id === up.id) dropFile(r, true);
-    else files.delete(up.id);
-    if (r.upload === up) r.upload = null;
+    if (up.queued) r.qups.delete(up.token); else if (r.upload === up) r.upload = null;
+    dropFileId(r, up.id, true); // и из плеера, и из очереди
     broadcast(r, roomInfo(r));
     if (!res.headersSent) json(res, code, { error: text });
     req.resume();
   };
   up.abort = () => fail(409, 'Загрузка отменена');
   // фильм, который можно смотреть по мере загрузки, появляется у всех сразу
-  if (up.early) publish();
+  if (up.early && !up.queued) publish();
   req.on('data', chunk => {
     if (done) return;
     got += chunk.length;
@@ -178,8 +183,14 @@ function apiUpload(req, res, token) {
     }
     if (now - lastSent > 700) {
       lastSent = now;
-      const j = judgeEarly(up); up.safe = up.safe || j.safe; up.wait = up.safe ? 0 : j.wait; // «можно начинать» назад не откатываем
-      broadcast(r, { t: 'upprog', gen: up.gen, loaded: got, total: up.size, safe: up.safe, wait: up.wait });
+      if (up.queued) {
+        const item = r.queue.find(q => q.qid === up.qid);
+        if (item) item.pct = Math.floor(got / up.size * 100);
+        broadcast(r, { t: 'qprog', qid: up.qid, pct: Math.floor(got / up.size * 100) });
+      } else {
+        const j = judgeEarly(up); up.safe = up.safe || j.safe; up.wait = up.safe ? 0 : j.wait; // «можно начинать» назад не откатываем
+        broadcast(r, { t: 'upprog', gen: up.gen, loaded: got, total: up.size, safe: up.safe, wait: up.wait });
+      }
     }
   });
   req.on('aborted', () => fail(400, 'Загрузка прервалась'));
@@ -190,8 +201,16 @@ function apiUpload(req, res, token) {
     if (got !== up.size) return fail(400, 'Файл пришёл не целиком');
     out.end(() => {
       if (done) return; done = true;
-      if (r.upload !== up) { unlinkQuiet(final); return json(res, 409, { error: 'Загрузка отменена' }); }
+      if (!alive()) { unlinkQuiet(final); return json(res, 409, { error: 'Загрузка отменена' }); }
       up.done = true; up.written = up.size; up.ev.emit('more');
+      if (up.queued) { // фильм ждёт своей очереди
+        r.qups.delete(up.token);
+        files.set(up.id, entry());
+        const item = r.queue.find(q => q.qid === up.qid);
+        if (item) { delete item.loading; delete item.pct; }
+        broadcast(r, roomInfo(r));
+        return json(res, 200, { ok: true, id: up.id });
+      }
       r.upload = null;
       const fe = files.get(up.id); if (fe) fe.up = null;
       if (up.early && r.media && r.media.kind === 'file' && r.media.id === up.id) {
@@ -251,40 +270,45 @@ async function streamGrowing(file, up, start, end, res) {
   } catch { res.destroy(); }
   finally { if (fd) fd.close().catch(() => {}); }
 }
-// убрать фильм комнаты с диска (и из плеера у всех, если он ещё показывается)
-function dropFile(r, silent) {
-  clearTimeout(r.fileTimer); r.fileTimer = null;
-  if (!r.file) return;
-  const f = files.get(r.file.id);
-  files.delete(r.file.id);
+// убрать фильм с диска: из плеера у всех (если он сейчас идёт), из очереди и из загрузок
+function dropFileId(r, id, silent) {
+  if (!id) return;
+  const f = files.get(id);
+  files.delete(id);
   if (f) unlinkQuiet(f.path);
-  const wasPlaying = r.media && r.media.kind === 'file' && r.media.id === r.file.id;
-  const fid = r.file.id;
-  r.file = null;
-  if (r.upload && r.upload.id === fid) cancelUpload(r); // фильм ещё догружался — загрузку тоже прекращаем
-  if (wasPlaying) {
+  r.owned.delete(id);
+  if (r.upload && r.upload.id === id) cancelUpload(r);
+  for (const [tk, up] of r.qups) if (up.id === id) { r.qups.delete(tk); if (up.abort) up.abort(); if (up.req) try { up.req.destroy(); } catch {} }
+  const qi = r.queue.findIndex(q => q.kind === 'file' && q.id === id);
+  if (qi >= 0) r.queue.splice(qi, 1);
+  if (r.media && r.media.kind === 'file' && r.media.id === id) {
     r.media = null; r.state = { playing: false, pos: 0, at: Date.now() };
     if (!silent) broadcast(r, roomInfo(r));
-  }
+  } else if (!silent && qi >= 0) broadcast(r, roomInfo(r));
 }
+function dropAllFiles(r) { for (const id of [...r.owned.keys()]) dropFileId(r, id, true); }
 function cancelUpload(r) {
   const up = r.upload; if (!up) return;
   r.upload = null;
   if (up.abort) up.abort();
   if (up.req) try { up.req.destroy(); } catch {}
 }
-// загрузивший ушёл? ждём 20 секунд (вдруг перезагрузил страницу), потом удаляем фильм
+// загрузивший ушёл? ждём 20 секунд (вдруг перезагрузил страницу), потом удаляем его фильмы — и тот, что идёт, и те, что в очереди
+const present = (r, vid) => !!vid && [...r.people.values()].some(p => p.vid === vid);
 function checkFileOwner(r) {
-  if (!r.file) return;
-  const here = r.file.vid && [...r.people.values()].some(p => p.vid === r.file.vid);
-  if (here) { clearTimeout(r.fileTimer); r.fileTimer = null; return; }
-  if (r.fileTimer) return;
-  if (!r.file.vid) return dropFile(r);
-  r.fileTimer = setTimeout(() => { r.fileTimer = null; checkFileOwnerNow(r); }, OWNER_GRACE);
-}
-function checkFileOwnerNow(r) {
-  if (!r.file) return;
-  if (!(r.file.vid && [...r.people.values()].some(p => p.vid === r.file.vid))) dropFile(r);
+  const owners = new Set(r.owned.values());
+  for (const [vid, t] of r.ownTimers) if (!owners.has(vid) || present(r, vid)) { clearTimeout(t); r.ownTimers.delete(vid); }
+  for (const vid of owners) {
+    if (present(r, vid) || r.ownTimers.has(vid)) continue;
+    if (!vid) { for (const [id, v] of [...r.owned]) if (!v) dropFileId(r, id); continue; }
+    r.ownTimers.set(vid, setTimeout(() => {
+      r.ownTimers.delete(vid);
+      if (present(r, vid)) return;
+      let changed = false;
+      for (const [id, v] of [...r.owned]) if (v === vid) { dropFileId(r, id, true); changed = true; }
+      if (changed) broadcast(r, roomInfo(r));
+    }, OWNER_GRACE));
+  }
 }
 async function freeSpace() {
   try { const st = await fs.promises.statfs(UPLOAD_DIR); return st.bavail * st.bsize; } catch { return Infinity; }
@@ -358,7 +382,7 @@ const hashPass = (salt, pass) => crypto.createHash('sha256').update(salt + '\u00
 
 function getRoom(code) {
   let r = rooms.get(code);
-  if (!r) { r = { people: new Map(), hostId: null, media: null, upload: null, file: null, upGen: 0, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
+  if (!r) { r = { people: new Map(), hostId: null, media: null, upload: null, qups: new Map(), owned: new Map(), ownTimers: new Map(), upGen: 0, queue: [], pass: null, state: { playing: false, pos: 0, at: Date.now() }, chat: [], emptySince: null }; rooms.set(code, r); }
   return r;
 }
 // Текущая позиция плеера по часам сервера — одинаковая для всех, кто подключится
@@ -388,8 +412,9 @@ function makeMedia(m) {
 }
 function playMedia(room, media, now, fileVid) {
   if (media) { media = { ...media, n: now }; delete media.qid; delete media.by; delete media.byName; }
-  dropFile(room, true); // прежний фильм с компьютера больше не нужен
-  if (media && media.kind === 'file') { room.file = { id: media.id, vid: fileVid || null }; }
+  // прежний фильм с компьютера больше не нужен (если это не он же)
+  if (room.media && room.media.kind === 'file' && !(media && media.kind === 'file' && media.id === room.media.id)) dropFileId(room, room.media.id, true);
+  if (media && media.kind === 'file') { delete media.loading; delete media.pct; if (fileVid !== undefined) room.owned.set(media.id, fileVid || null); }
   room.media = media;
   room.state = { playing: false, pos: 0, at: now };
   broadcast(room, roomInfo(room));
@@ -511,23 +536,32 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
     const isHost = room.hostId === id;
 
     switch (m.t) {
-      case 'upreq': { // ведущий хочет загрузить фильм со своего компьютера
-        if (!isHost) return;
+      case 'upreq': { // загрузить фильм с компьютера: ведущий — включить сейчас, любой — в очередь
+        const queued = !!m.queue;
+        if (!queued && !isHost) return;
+        const cid = clean(m.cid, 16);
         const name = clean(m.name, 200) || 'Видео';
         const size = Number(m.size);
         let ext = path.extname(name).toLowerCase(); if (!VIDEO_TYPES[ext]) ext = '.mp4';
-        if (!Number.isSafeInteger(size) || size <= 0) return send(ws, { t: 'upfail', text: 'Пустой файл' });
-        if (size > MAX_UPLOAD) return send(ws, { t: 'upfail', text: `Файл слишком большой: можно до ${Math.round(MAX_UPLOAD / 1048576)} МБ` });
-        cancelUpload(room); // предыдущая незаконченная загрузка больше не нужна
+        if (!Number.isSafeInteger(size) || size <= 0) return send(ws, { t: 'upfail', cid, text: 'Пустой файл' });
+        if (size > MAX_UPLOAD) return send(ws, { t: 'upfail', cid, text: `Файл слишком большой: можно до ${Math.round(MAX_UPLOAD / 1048576)} МБ` });
+        if (queued && room.queue.length >= QUEUE_MAX) return send(ws, { t: 'upfail', cid, text: 'Очередь заполнена' });
+        if (queued && [...room.qups.values()].some(u => u.vid && u.vid === me.vid)) return send(ws, { t: 'upfail', cid, text: 'Сначала дождитесь, пока загрузится предыдущий фильм' });
+        if (!queued) cancelUpload(room); // предыдущая незаконченная загрузка больше не нужна
         const reserve = 200 * 1048576;
-        const free = await freeSpace() + (room.file && files.get(room.file.id) ? files.get(room.file.id).size : 0);
-        if (free < size + reserve) return send(ws, { t: 'upfail', text: 'На сервере сейчас не хватает места для такого файла' });
-        if (room.hostId !== id) return;
+        const cur = !queued && room.media && room.media.kind === 'file' && files.get(room.media.id);
+        const free = await freeSpace() + (cur ? cur.size : 0);
+        if (free < size + reserve) return send(ws, { t: 'upfail', cid, text: 'На сервере сейчас не хватает места для такого файла' });
+        if (!queued && room.hostId !== id) return;
         const dur = Number(m.dur);
         const up = { token: randId(24), gen: ++room.upGen, id: randId(16), vid: me.vid || null, name: name.replace(/\.[a-z0-9]{1,5}$/i, '') || name, size, ext, loaded: 0,
-          dur: Number.isFinite(dur) && dur > 1 && dur < 86400 ? dur : 0, early: !!m.early, safe: false, wait: null };
-        room.upload = up;
-        send(ws, { t: 'uptoken', token: up.token, gen: up.gen });
+          dur: Number.isFinite(dur) && dur > 1 && dur < 86400 ? dur : 0, early: !!m.early && !queued, safe: false, wait: null, queued };
+        if (queued) { // в очереди сразу появляется строчка «загружается…»
+          up.qid = crypto.randomBytes(4).toString('hex');
+          room.qups.set(up.token, up); room.owned.set(up.id, up.vid);
+          room.queue.push({ kind: 'file', id: up.id, title: up.name, size, qid: up.qid, by: id, byName: me.name, loading: true, pct: 0 });
+        } else room.upload = up;
+        send(ws, { t: 'uptoken', token: up.token, gen: up.gen, id: up.id, cid, queued });
         broadcast(room, roomInfo(room));
         break;
       }
@@ -557,7 +591,8 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
       case 'qdel': { // убрать из очереди: ведущий — любое, участник — своё
         const i = room.queue.findIndex(q => q.qid === String(m.qid));
         if (i < 0 || !(isHost || room.queue[i].by === id)) return;
-        room.queue.splice(i, 1);
+        const [gone] = room.queue.splice(i, 1);
+        if (gone.kind === 'file') dropFileId(room, gone.id, true); // фильм с компьютера убрали из очереди — стираем
         broadcast(room, roomInfo(room));
         break;
       }
@@ -573,13 +608,16 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         if (!isHost) return;
         const i = room.queue.findIndex(q => q.qid === String(m.qid));
         if (i < 0) return;
+        if (room.queue[i].loading) return send(ws, { t: 'error', text: 'Этот фильм ещё загружается' });
         const [item] = room.queue.splice(i, 1);
         playMedia(room, item, now);
         break;
       }
       case 'next': { // ведущий: следующее видео из очереди (вручную или по окончании)
-        if (!isHost || !room.queue.length) return;
-        playMedia(room, room.queue.shift(), now);
+        if (!isHost) return;
+        const i = room.queue.findIndex(q => !q.loading); // ещё загружающиеся фильмы пропускаем
+        if (i < 0) return;
+        playMedia(room, room.queue.splice(i, 1)[0], now);
         break;
       }
       case 'setpass': { // ведущий ставит, меняет или снимает пароль
@@ -654,7 +692,7 @@ setInterval(() => {
     ws.isAlive = false; ws.ping();
   }
   const now = Date.now();
-  for (const [code, r] of rooms) if (r.emptySince && now - r.emptySince > ROOM_TTL) { cancelUpload(r); dropFile(r, true); rooms.delete(code); }
+  for (const [code, r] of rooms) if (r.emptySince && now - r.emptySince > ROOM_TTL) { cancelUpload(r); dropAllFiles(r); for (const t of r.ownTimers.values()) clearTimeout(t); rooms.delete(code); }
 }, 25000);
 
 server.listen(PORT, () => console.log(`Общий диван запущен: http://localhost:${PORT}`));
