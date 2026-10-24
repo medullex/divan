@@ -1199,6 +1199,7 @@ function applyState(strict){
    • большое — прыгаем С ЗАПАСОМ вперёд (сколько у этого телефона реально занимает загрузка после перемотки),
      стоим на паузе, пока ведущий не дойдёт до этого места, и стартуем вместе;
    • пока видео грузится после прыжка, новых прыжков не делаем. */
+const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const follow = { busy: false, lag: 2.5, hold: null, t0: 0, slow: 0, warned: false };
 function setRate(r){ if (Math.abs(v.playbackRate - r) > 0.01) try { v.playbackRate = r; } catch {} }
 function followJump(target){
@@ -1240,7 +1241,12 @@ function fileFollow(){
   if (v.readyState < 3) return; // подгружается — не дёргаем
   // ускоряемся, только если впереди уже есть загруженный запас — иначе на медленном интернете станет только хуже
   let ahead = 0; for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) > v.currentTime) ahead = v.buffered.end(i) - v.currentTime;
-  setRate(diff > 0.4 && ahead > 4 ? (diff > 6 ? 1.5 : diff > 2 ? 1.25 : 1.1) : 1);
+  if (IOS){ // Safari на iPhone при смене скорости перезапускает звук и подтормаживает — там только прыжок с запасом
+    setRate(1);
+    if (diff > 2.5) followJump(target);
+    return;
+  }
+  setRate(diff > 0.6 && ahead > 4 ? (diff > 6 ? 1.5 : diff > 2 ? 1.25 : 1.1) : 1);
 }
 setInterval(fileFollow, 1000);
 // отчёт для отладки: раз в 15 с зритель фильма с сервера сообщает, как у него идёт (видно в логах Render)
