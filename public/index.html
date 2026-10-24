@@ -1163,7 +1163,7 @@ function handleMedia(m, st){
   unmountPlayer();
   if (!m) return;
   joined = amHost() || joinedOnce;
-  if (m.kind === 'file'){ v.hidden = false; box.hidden = true; player = filePlayer(m, onPlayerEvent); }
+  if (m.kind === 'file'){ v.hidden = false; box.hidden = true; follow.busy = false; clearTimeout(follow.hold); follow.hold = null; setRate(1); player = filePlayer(m, onPlayerEvent); }
   else {
     v.pause(); v.hidden = true; box.hidden = false;
     player = m.kind === 'vk' ? vkPlayer(m, onPlayerEvent) : rutubePlayer(m.id, onPlayerEvent);
@@ -1185,12 +1185,79 @@ function expectedPos(){
 function holdEmb(){ embApplying = true; clearTimeout(embTimer); embTimer = setTimeout(() => embApplying = false, 1200); }
 function applyState(strict){
   if (!player || !lastState || amHost() || !joined) return;
+  if (media && media.kind === 'file') return fileFollow();
   holdEmb();
   const target = expectedPos();
   if (Math.abs(player.time() - target) > (strict ? 1 : 2.5)) player.seek(target);
   if (lastState.playing && !player.isPlaying()) player.play();
   if (!lastState.playing && player.isPlaying()) player.pause();
 }
+/* Фильм с сервера у зрителя: догоняем ведущего без бесконечных перемоток.
+   Раньше при отставании >2,5 с плеер прыгал на «сейчас», телефон по LTE начинал заново грузить,
+   за это время ведущий уходил вперёд — и снова прыжок. Теперь:
+   • небольшое отставание (до 12 с) догоняем ускорением ×1,1…×1,5, без перемотки;
+   • большое — прыгаем С ЗАПАСОМ вперёд (сколько у этого телефона реально занимает загрузка после перемотки),
+     стоим на паузе, пока ведущий не дойдёт до этого места, и стартуем вместе;
+   • пока видео грузится после прыжка, новых прыжков не делаем. */
+const follow = { busy: false, lag: 2.5, hold: null, t0: 0, slow: 0, warned: false };
+function setRate(r){ if (Math.abs(v.playbackRate - r) > 0.01) try { v.playbackRate = r; } catch {} }
+function followJump(target){
+  follow.busy = true; follow.t0 = performance.now(); clearTimeout(follow.hold);
+  const to = Math.max(0, Math.min((v.duration || 1e9) - 1, target + follow.lag));
+  setRate(1); v.pause();
+  try { v.currentTime = to; } catch {}
+  const ready = () => {
+    if (!follow.busy) return;
+    if (v.readyState < 3) return; // ещё не набрал, ждём canplay
+    v.removeEventListener('canplay', ready); v.removeEventListener('seeked', ready);
+    const took = (performance.now() - follow.t0) / 1000;
+    follow.lag = Math.max(1.5, Math.min(25, follow.lag * 0.5 + (took + 1) * 0.5)); // запоминаем, сколько грузится у этого телефона
+    follow.busy = false;
+    if (took > 12 && !follow.warned){ follow.warned = true; toast('Интернет еле успевает за фильмом — возможны подвисания. Лучше Wi-Fi или фильм поменьше.', 7000); }
+    fileFollow();
+  };
+  v.addEventListener('canplay', ready); v.addEventListener('seeked', ready);
+  setTimeout(() => { if (follow.busy && performance.now() - follow.t0 > 29000){ follow.busy = false; follow.lag = 25; fileFollow(); } }, 30000);
+}
+function fileFollow(){
+  if (!player || !lastState || amHost() || !joined || !media || media.kind !== 'file') return;
+  if (follow.busy) return;
+  const target = expectedPos(), diff = target - v.currentTime; // >0 — мы отстаём
+  if (!lastState.playing){
+    clearTimeout(follow.hold); follow.hold = null; setRate(1);
+    if (player.isPlaying()) player.pause();
+    if (Math.abs(diff) > 0.5) try { v.currentTime = target; } catch {}
+    return;
+  }
+  if (follow.hold) return; // стоим и ждём ведущего
+  if (diff > 12 || diff < -8) return followJump(target);
+  if (diff < -0.4){ // мы впереди: постоим на паузе, пока ведущий не догонит
+    v.pause(); setRate(1);
+    follow.hold = setTimeout(() => { follow.hold = null; player.play(); fileFollow(); }, -diff * 1000);
+    return;
+  }
+  if (!player.isPlaying()) player.play();
+  if (v.readyState < 3) return; // подгружается — не дёргаем
+  // ускоряемся, только если впереди уже есть загруженный запас — иначе на медленном интернете станет только хуже
+  let ahead = 0; for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) > v.currentTime) ahead = v.buffered.end(i) - v.currentTime;
+  setRate(diff > 0.4 && ahead > 4 ? (diff > 6 ? 1.5 : diff > 2 ? 1.25 : 1.1) : 1);
+}
+setInterval(fileFollow, 1000);
+// отчёт для отладки: раз в 15 с зритель фильма с сервера сообщает, как у него идёт (видно в логах Render)
+let diagStalls = 0; v.addEventListener('waiting', () => diagStalls++);
+setInterval(() => {
+  if (!player || amHost() || !media || media.kind !== 'file' || !lastState || !joined) return;
+  let ahead = 0; for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) > v.currentTime) ahead = v.buffered.end(i) - v.currentTime;
+  if (diagStalls - (follow.lastStalls || 0) >= 3 && !follow.warned){ // за 15 с трижды встали на подгрузку
+    follow.warned = true;
+    const need = media.size && v.duration ? (media.size * 8 / v.duration / 1e6).toFixed(1) : null;
+    toast('Интернет не успевает за этим фильмом' + (need ? ' (ему нужно примерно ' + need + ' Мбит/с)' : '') + ' — будут подвисания. Помогут Wi-Fi или файл поменьше.', 8000);
+  }
+  follow.lastStalls = diagStalls;
+  out({ t:'diag', lag: +(expectedPos() - v.currentTime).toFixed(1), rs: v.readyState, ahead: +ahead.toFixed(1), stalls: diagStalls, seekLag: +follow.lag.toFixed(1),
+    busy: follow.busy, rate: v.playbackRate, paused: v.paused, mbit: media.size && v.duration ? +(media.size * 8 / v.duration / 1e6).toFixed(1) : null });
+}, 15000);
+
 function sendSync(ev){
   if (!player || !amHost()) return;
   out({ t:'sync', playing: player.isPlaying(), pos: player.time(), ev: !!ev });
