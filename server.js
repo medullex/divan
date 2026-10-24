@@ -90,6 +90,7 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/api/upload') return apiUpload(req, res, url.searchParams.get('t'));
   if (url.pathname.startsWith('/media/')) return serveMedia(req, res, url.pathname.slice(7));
   if (url.pathname === '/stats') url.pathname = '/stats.html';
+  if (url.pathname === '/privacy') url.pathname = '/privacy.html';
   if (url.pathname === '/api/search') return apiSearch(url.searchParams.get('q'), res);
   if (url.pathname === '/api/rutube') return apiRutubeInfo(url.searchParams.get('id'), res);
   const file = path.normalize(path.join(PUBLIC, url.pathname === '/' ? 'index.html' : url.pathname));
