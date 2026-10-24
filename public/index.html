@@ -67,6 +67,17 @@ input[type=text]{min-width:0;background:var(--bg);color:var(--fg);border:1px sol
   --bgimg:repeating-linear-gradient(0deg,rgba(255,255,255,.025) 0 2px,transparent 2px 4px),radial-gradient(ellipse at 50% 0,rgba(242,193,78,.15) 0,transparent 55%)}
 :root[data-theme="candy"]{--bg:#160e17;--seat:#241626;--line:#46294a;--lamp:#ff9ec7;--lamp-ink:#2a0a18;--muted:#c0a3bf;
   --bgimg:radial-gradient(circle at 15% 20%,rgba(255,158,199,.16) 0,transparent 30%),radial-gradient(circle at 80% 70%,rgba(158,220,255,.14) 0,transparent 35%)}
+:root[data-theme="noir"]{--bg:#050505;--seat:#111;--line:#2c2c2c;--fg:#f2f2f2;--lamp:#f2f2f2;--lamp-ink:#000;--muted:#9a9a9a;--rose:#bdbdbd;--ok:#e6e6e6;--warn:#cfcfcf;
+  --bgimg:radial-gradient(ellipse at 50% -5%,rgba(255,255,255,.13) 0,transparent 45%),radial-gradient(ellipse at 50% 50%,transparent 55%,rgba(0,0,0,.7) 100%)}
+:root[data-theme="graphite"]{--bg:#191919;--seat:#232323;--line:#3b3b3b;--fg:#ececec;--lamp:#cfcfcf;--lamp-ink:#111;--muted:#a3a3a3;--rose:#b0b0b0;--ok:#dcdcdc;--warn:#c4c4c4;
+  --bgimg:repeating-linear-gradient(135deg,rgba(255,255,255,.025) 0 2px,transparent 2px 12px)}
+:root[data-theme="film"]{--bg:#0b0b0b;--seat:#161616;--line:#333;--fg:#efefef;--lamp:#e3e3e3;--lamp-ink:#0b0b0b;--muted:#9c9c9c;--rose:#b5b5b5;--ok:#e0e0e0;--warn:#c8c8c8;
+  --bgimg:repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px),radial-gradient(ellipse at 50% 40%,rgba(255,255,255,.07) 0,transparent 60%),radial-gradient(ellipse at 50% 50%,transparent 60%,rgba(0,0,0,.65) 100%)}
+:root[data-theme="fog"]{--bg:#1f1f20;--seat:#2a2a2b;--line:#454547;--fg:#f0f0f0;--lamp:#fff;--lamp-ink:#1a1a1a;--muted:#b3b3b3;--rose:#c2c2c2;--ok:#e8e8e8;--warn:#d0d0d0;
+  --bgimg:radial-gradient(ellipse at 15% 10%,rgba(255,255,255,.1) 0,transparent 45%),radial-gradient(ellipse at 85% 90%,rgba(255,255,255,.07) 0,transparent 50%)}
+:root[data-theme="paper"]{--bg:#efeeea;--seat:#fbfbf9;--line:#cfcdc7;--fg:#141414;--lamp:#141414;--lamp-ink:#fff;--muted:#5c5c5c;--rose:#555;--ok:#2b2b2b;--warn:#444;color-scheme:light;
+  --bgimg:repeating-linear-gradient(0deg,rgba(0,0,0,.045) 0 1px,transparent 1px 24px),repeating-linear-gradient(90deg,rgba(0,0,0,.045) 0 1px,transparent 1px 24px)}
+:root[data-theme="paper"] .screen{--fg:#f2f2f2;--muted:#a0a0a0;--line:#333;--seat:#151515;--lamp:#f2f2f2;--lamp-ink:#111;color:var(--fg);color-scheme:dark}
 .themebtn{background:var(--seat);border:1px solid var(--line);color:var(--fg);border-radius:999px;padding:5px 12px;font:500 13px var(--body);cursor:pointer}
 .themebtn:hover{border-color:var(--lamp)}
 .hdr-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
@@ -1185,7 +1196,7 @@ function expectedPos(){
 function holdEmb(){ embApplying = true; clearTimeout(embTimer); embTimer = setTimeout(() => embApplying = false, 1200); }
 function applyState(strict){
   if (!player || !lastState || amHost() || !joined) return;
-  if (media && media.kind === 'file') return fileFollow();
+  if (media && media.kind === 'file') return fileFollow(strict);
   holdEmb();
   const target = expectedPos();
   if (Math.abs(player.time() - target) > (strict ? 1 : 2.5)) player.seek(target);
@@ -1195,12 +1206,12 @@ function applyState(strict){
 /* Фильм с сервера у зрителя: догоняем ведущего без бесконечных перемоток.
    Раньше при отставании >2,5 с плеер прыгал на «сейчас», телефон по LTE начинал заново грузить,
    за это время ведущий уходил вперёд — и снова прыжок. Теперь:
-   • небольшое отставание (до 12 с) догоняем ускорением ×1,1…×1,5, без перемотки;
+   • небольшое отставание (до 3 с) догоняем ускорением ×1,1…×1,25, без перемотки (кроме iPhone);
    • большое — прыгаем С ЗАПАСОМ вперёд (сколько у этого телефона реально занимает загрузка после перемотки),
      стоим на паузе, пока ведущий не дойдёт до этого места, и стартуем вместе;
    • пока видео грузится после прыжка, новых прыжков не делаем. */
 const IOS = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const follow = { busy: false, lag: 2.5, hold: null, t0: 0, slow: 0, warned: false };
+const follow = { busy: false, lag: 1.5, hold: null, t0: 0, slow: 0, warned: false };
 function setRate(r){ if (Math.abs(v.playbackRate - r) > 0.01) try { v.playbackRate = r; } catch {} }
 function followJump(target){
   follow.busy = true; follow.t0 = performance.now(); clearTimeout(follow.hold);
@@ -1220,7 +1231,7 @@ function followJump(target){
   v.addEventListener('canplay', ready); v.addEventListener('seeked', ready);
   setTimeout(() => { if (follow.busy && performance.now() - follow.t0 > 29000){ follow.busy = false; follow.lag = 25; fileFollow(); } }, 30000);
 }
-function fileFollow(){
+function fileFollow(strict){
   if (!player || !lastState || amHost() || !joined || !media || media.kind !== 'file') return;
   if (follow.busy) return;
   const target = expectedPos(), diff = target - v.currentTime; // >0 — мы отстаём
@@ -1231,7 +1242,7 @@ function fileFollow(){
     return;
   }
   if (follow.hold) return; // стоим и ждём ведущего
-  if (diff > 12 || diff < -8) return followJump(target);
+  if (diff > (strict ? 1 : 3) || diff < -8) return followJump(target); // перемотка ведущим или большое отставание — сразу прыгаем
   if (diff < -0.4){ // мы впереди: постоим на паузе, пока ведущий не догонит
     v.pause(); setRate(1);
     follow.hold = setTimeout(() => { follow.hold = null; player.play(); fileFollow(); }, -diff * 1000);
@@ -1243,10 +1254,10 @@ function fileFollow(){
   let ahead = 0; for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) > v.currentTime) ahead = v.buffered.end(i) - v.currentTime;
   if (IOS){ // Safari на iPhone при смене скорости перезапускает звук и подтормаживает — там только прыжок с запасом
     setRate(1);
-    if (diff > 2.5) followJump(target);
+    if (diff > 2) followJump(target);
     return;
   }
-  setRate(diff > 0.6 && ahead > 4 ? (diff > 6 ? 1.5 : diff > 2 ? 1.25 : 1.1) : 1);
+  setRate(diff > 0.6 && ahead > 4 ? (diff > 1.5 ? 1.25 : 1.1) : 1);
 }
 setInterval(fileFollow, 1000);
 // отчёт для отладки: раз в 15 с зритель фильма с сервера сообщает, как у него идёт (видно в логах Render)
@@ -1622,7 +1633,8 @@ $('#stkBtn').dataset.popAnchor = 1; $('#stkBtn').addEventListener('click', e => 
 // фоны
 const THEMES = [['', 'Диван', '#141012', '#f5a742'], ['cinema', 'Кино', '#12080a', '#e5484d'], ['night', 'Ночь', '#0a0e18', '#7aa2ff'], ['forest', 'Лес', '#0b120e', '#8fd17a'],
   ['neon', 'Неон', '#0c0916', '#ff4fd8'], ['sunset', 'Закат', '#170d12', '#ff8a5c'], ['ocean', 'Океан', '#07131a', '#3fd0c9'], ['space', 'Космос', '#06060c', '#c9a0ff'],
-  ['retro', 'Ретро', '#1a150f', '#f2c14e'], ['candy', 'Конфета', '#160e17', '#ff9ec7']];
+  ['retro', 'Ретро', '#1a150f', '#f2c14e'], ['candy', 'Конфета', '#160e17', '#ff9ec7'],
+  ['noir', 'Нуар', '#050505', '#f2f2f2'], ['graphite', 'Графит', '#191919', '#cfcfcf'], ['film', 'Плёнка', '#0b0b0b', '#8a8a8a'], ['fog', 'Туман', '#2a2a2b', '#ffffff'], ['paper', 'Бумага', '#efeeea', '#141414']];
 function setTheme(t){
   if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
   store.set('divan-theme', t);
