@@ -250,25 +250,38 @@ function serveMedia(req, res, id) {
 }
 async function streamGrowing(file, up, start, end, res) {
   let fd = null, closed = false;
-  res.on('close', () => { closed = true; up.ev.emit('more'); });
-  const waitMore = () => new Promise(ok => { const t = setTimeout(ok, 15000); up.ev.once('more', () => { clearTimeout(t); ok(); }); });
+  const wake = new EventEmitter(); wake.setMaxListeners(0);
+  const onMore = () => wake.emit('go');
+  up.ev.on('more', onMore);
+  res.on('close', () => { closed = true; wake.emit('go'); });
+  // ждём новых кусочков или освобождения сети; если зритель уже ушёл — не ждём вовсе
+  // (раньше ожидание могло повиснуть навсегда, файл «терялся» и Node падал целиком — сайт выдавал 502)
+  const wait = (ms, drain) => new Promise(ok => {
+    if (closed || res.destroyed) return ok();
+    const done = () => { clearTimeout(t); wake.off('go', done); res.off('drain', done); ok(); };
+    const t = setTimeout(done, ms);
+    wake.on('go', done); if (drain) res.on('drain', done);
+  });
   try {
     fd = await fs.promises.open(file, 'r');
     let pos = start;
-    while (pos <= end && !closed) {
+    while (pos <= end && !closed && !res.destroyed) {
       if (up.failed) throw new Error('upload failed');
       const avail = up.done ? end + 1 : Math.min(end + 1, up.written);
-      if (pos >= avail) { await waitMore(); continue; }
+      if (pos >= avail) { await wait(15000); continue; }
       const n = Math.min(256 * 1024, avail - pos);
       const buf = Buffer.allocUnsafe(n);
       const { bytesRead } = await fd.read(buf, 0, n, pos);
-      if (!bytesRead) { await waitMore(); continue; }
+      if (!bytesRead) { await wait(15000); continue; }
       pos += bytesRead;
-      if (!res.write(buf.subarray(0, bytesRead))) await new Promise(ok => { res.once('drain', ok); res.once('close', ok); });
+      if (!res.write(buf.subarray(0, bytesRead))) await wait(60000, true);
     }
-    if (!closed) res.end();
+    if (!closed && !res.destroyed) res.end();
   } catch { res.destroy(); }
-  finally { if (fd) fd.close().catch(() => {}); }
+  finally {
+    up.ev.off('more', onMore);
+    if (fd) await fd.close().catch(() => {});
+  }
 }
 // убрать фильм с диска: из плеера у всех (если он сейчас идёт), из очереди и из загрузок
 function dropFileId(r, id, silent) {
@@ -444,6 +457,10 @@ function liveRooms() {
   for (const [code, r] of rooms) for (const p of r.people.values()) if (p.vid) m.set(p.vid, code);
   return m;
 }
+
+// страховка: если где-то случится непойманная ошибка, пишем её в лог, а сайт продолжает работать
+process.on('uncaughtException', e => console.error('[uncaught]', e && e.stack || e));
+process.on('unhandledRejection', e => console.error('[unhandled]', e && e.stack || e));
 
 // ---------- websocket ----------
 const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, (ws, req) => {
