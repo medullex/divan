@@ -539,7 +539,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, (ws,
         if (++passTries > 10) return send(ws, { t: 'error', text: 'Слишком много попыток. Обновите страницу.' });
         const ok = pass && crypto.timingSafeEqual(hashPass(r.pass.salt, pass), r.pass.hash);
         if (!ok) return send(ws, { t: 'needpass', wrong: !!pass });
-      } else if (r.people.size === 0 && !r.hostId && pass) { // создатель комнаты задал пароль
+      } else if (r.people.size === 0 && !r.hostId && !r.ownerVid && pass) { // создатель новой комнаты задал пароль (в чужую опустевшую комнату пароль не поставить)
         const salt = crypto.randomBytes(8).toString('hex');
         r.pass = { salt, hash: hashPass(salt, pass) };
       }
@@ -572,6 +572,7 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, (ws,
     }
     if (!room) return;
     const me = room.people.get(id);
+    if (!me) return; // эту вкладку уже заменила новая (тот же браузер зашёл ещё раз)
     const isHost = room.hostId === id;
 
     switch (m.t) {
