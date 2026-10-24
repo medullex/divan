@@ -130,13 +130,16 @@ function cacheFriend(a, b, on) {
 }
 
 // ---------- HTTP API ----------
-const hits = new Map(); // ip -> { n, at } — защита от перебора паролей
-function limited(req, max) {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
-  const now = Date.now(); let h = hits.get(ip);
-  if (!h || now - h.at > 10 * 60e3) { h = { n: 0, at: now }; hits.set(ip, h); }
-  if (hits.size > 5000) hits.clear();
+const hits = new Map(); // ключ (адрес или ник) -> { n, at } — защита от перебора паролей
+function bump(key, max) {
+  const now = Date.now(); let h = hits.get(key);
+  if (!h || now - h.at > 10 * 60e3) { h = { n: 0, at: now }; hits.set(key, h); }
+  if (hits.size > 20000) for (const [k, v] of hits) if (now - v.at > 10 * 60e3) hits.delete(k); // убираем только устаревшие
   return ++h.n > max;
+}
+function limited(req, max) {
+  const ip = String(req.headers['cf-connecting-ip'] || req.headers['true-client-ip'] || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  return bump('ip:' + ip, max);
 }
 function readBody(req, max = 4096) {
   return new Promise((res, rej) => {
@@ -191,6 +194,8 @@ async function handle(req, res, pathname) {
         const token = await newSession(login);
         return send(res, 200, { token, user: publicUser(login, { name, emoji, color }) }), true;
       }
+      // подбор пароля к одному нику: не больше 20 попыток за 10 минут, с какого бы адреса ни шли
+      if (validLogin(login) && bump('login:' + login, 20)) return send(res, 429, { error: 'Слишком много попыток входа в этот аккаунт. Подождите 10 минут.' }), true;
       const u = validLogin(login) ? await getUser(login) : null;
       const key = await scrypt(pass, u ? u.salt : DUMMY_SALT); // считаем хеш всегда, чтобы по времени ответа нельзя было понять, есть ли ник
       if (!u || !crypto.timingSafeEqual(key, Buffer.from(u.hash, 'hex'))) return send(res, 401, { error: 'Неверный ник или пароль' }), true;
