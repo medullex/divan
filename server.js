@@ -446,7 +446,7 @@ function liveRooms() {
 }
 
 // ---------- websocket ----------
-const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws => {
+const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, (ws, req) => {
   let room = null, roomCode = null, id = null, passTries = 0;
   // антиспам: запас 80 сообщений, пополняется ~20 в секунду
   let tokens = 80, last = Date.now();
@@ -657,6 +657,13 @@ const wss = miniws.attach(server, { path: '/ws', maxPayload: 1024 * 1024 }, ws =
         if (!Number.isFinite(pos) || pos < 0 || pos > 1e6) return;
         room.state = { playing: !!m.playing, pos, at: now };
         broadcast(room, { t: 'sync', playing: !!m.playing, pos, ev: m.ev ? 1 : 0 }, id);
+        break;
+      }
+      case 'diag': { // отчёт зрителя о том, как идёт фильм (для отладки, только в лог)
+        const ua = String(req.headers['user-agent'] || '');
+        const dev = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : 'PC';
+        const d = {}; for (const k of ['lag','rs','ahead','stalls','seekLag','busy','rate','paused','mbit']) if (k in m) d[k] = typeof m[k] === 'number' || typeof m[k] === 'boolean' ? m[k] : null;
+        console.log('[diag]', roomCode, dev, clean(me.name, 20), JSON.stringify(d));
         break;
       }
       case 'givehost': { // ведущий передаёт управление
